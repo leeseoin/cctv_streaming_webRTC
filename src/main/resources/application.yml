@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: webrtc
+
+  # 터미널 색 추가
+  output:
+    ansi:
+      enabled: always
+
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: 8085
+
+app:
+  go2rtc:
+    binary: ./go2rtc
+    config: ./go2rtc.yaml
+    api-url: http://localhost:1984
