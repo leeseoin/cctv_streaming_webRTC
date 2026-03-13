@@ -48,10 +48,45 @@
             background: #000;
             border-radius: 8px;
         }
+        .stats-panel {
+            width: 100%;
+            max-width: 960px;
+            margin-top: 15px;
+            background: #16213e;
+            border-radius: 8px;
+            padding: 15px;
+            display: none;
+        }
+        .stats-panel h3 {
+            color: #e94560;
+            font-size: 14px;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #1a1a3e;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+        }
+        .stat-item {
+            background: #0a0a1a;
+            border-radius: 6px;
+            padding: 10px;
+            text-align: center;
+        }
+        .stat-label { font-size: 11px; color: #999; margin-bottom: 4px; }
+        .stat-value { font-size: 18px; color: #4ecca3; font-weight: bold; }
+        .stat-unit { font-size: 11px; color: #666; }
+        .connection-type { font-size: 12px; color: #999; margin-top: 10px; }
     </style>
 </head>
 <body>
     <h1>CCTV Streamer</h1>
+    <div style="margin-bottom: 15px; font-size: 13px;">
+        <a href="/dashboard.html" style="color: #e94560;">40CH Dashboard →</a> |
+        <a href="/monitor.html" style="color: #e94560;">System Monitor →</a>
+    </div>
 
     <div class="controls">
         <select id="cameraSelect">
@@ -66,12 +101,47 @@
 
     <video id="video" autoplay muted playsinline></video>
 
+    <div class="stats-panel" id="statsPanel">
+        <h3>WebRTC 연결 통계 (1초마다 갱신)</h3>
+        <div class="stats-grid">
+            <div class="stat-item">
+                <div class="stat-label">지연시간 (RTT)</div>
+                <div><span class="stat-value" id="stat-rtt">-</span> <span class="stat-unit">ms</span></div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Jitter (떨림)</div>
+                <div><span class="stat-value" id="stat-jitter">-</span> <span class="stat-unit">ms</span></div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">프레임률</div>
+                <div><span class="stat-value" id="stat-fps">-</span> <span class="stat-unit">fps</span></div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">비트레이트</div>
+                <div><span class="stat-value" id="stat-bitrate">-</span> <span class="stat-unit">kbps</span></div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">해상도</div>
+                <div><span class="stat-value" id="stat-resolution">-</span></div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">패킷 손실</div>
+                <div><span class="stat-value" id="stat-packetloss">-</span> <span class="stat-unit">%</span></div>
+            </div>
+        </div>
+        <div class="connection-type" id="stat-connection">연결 방식: -</div>
+    </div>
+
     <script>
         let pc = null;
+        let statsInterval = null;
+        let prevBytesReceived = 0;
+        let prevTimestamp = 0;
         const video = document.getElementById('video');
         const status = document.getElementById('status');
         const connectBtn = document.getElementById('connectBtn');
         const disconnectBtn = document.getElementById('disconnectBtn');
+        const statsPanel = document.getElementById('statsPanel');
 
         async function connect() {
             const cameraId = document.getElementById('cameraSelect').value;
@@ -127,6 +197,9 @@
                 const answer = await response.json();
                 await pc.setRemoteDescription(answer);
 
+                // WebRTC 통계 수집 시작
+                startStats();
+
             } catch (e) {
                 console.error('연결 실패:', e);
                 setStatus('연결 실패: ' + e.message, 'disconnected');
@@ -136,6 +209,7 @@
         }
 
         function disconnect() {
+            stopStats();
             if (pc) {
                 pc.close();
                 pc = null;
@@ -144,11 +218,98 @@
             setStatus('연결 안 됨', 'disconnected');
             connectBtn.disabled = false;
             disconnectBtn.disabled = true;
+            statsPanel.style.display = 'none';
         }
 
         function setStatus(text, className) {
             status.textContent = text;
             status.className = className;
+        }
+
+        // WebRTC 통계 수집
+        function startStats() {
+            prevBytesReceived = 0;
+            prevTimestamp = 0;
+            statsPanel.style.display = 'block';
+            statsInterval = setInterval(collectStats, 1000);
+        }
+
+        function stopStats() {
+            if (statsInterval) {
+                clearInterval(statsInterval);
+                statsInterval = null;
+            }
+        }
+
+        async function collectStats() {
+            if (!pc) return;
+
+            try {
+                const stats = await pc.getStats();
+
+                stats.forEach(report => {
+                    // 연결 후보쌍 (RTT, 연결 방식)
+                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                        const rtt = report.currentRoundTripTime;
+                        if (rtt !== undefined) {
+                            document.getElementById('stat-rtt').textContent = (rtt * 1000).toFixed(1);
+                        }
+
+                        // 연결 방식 표시 (P2P인지 TURN인지)
+                        const localId = report.localCandidateId;
+                        const remoteId = report.remoteCandidateId;
+                        stats.forEach(c => {
+                            if (c.id === localId && c.type === 'local-candidate') {
+                                const type = c.candidateType; // host, srflx, relay
+                                let label = 'P2P 직접 연결';
+                                if (type === 'relay') label = 'TURN 중계 연결';
+                                else if (type === 'srflx') label = 'STUN 반사 연결';
+                                document.getElementById('stat-connection').textContent =
+                                    `연결 방식: ${label} (${type}) | ${c.protocol?.toUpperCase() || ''}`;
+                            }
+                        });
+                    }
+
+                    // 수신 영상 통계 (비트레이트, 프레임, 해상도, 패킷손실, jitter)
+                    if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                        // 비트레이트 계산
+                        if (prevTimestamp > 0) {
+                            const byteDiff = report.bytesReceived - prevBytesReceived;
+                            const timeDiff = (report.timestamp - prevTimestamp) / 1000;
+                            if (timeDiff > 0) {
+                                const kbps = Math.round((byteDiff * 8) / timeDiff / 1000);
+                                document.getElementById('stat-bitrate').textContent = kbps;
+                            }
+                        }
+                        prevBytesReceived = report.bytesReceived;
+                        prevTimestamp = report.timestamp;
+
+                        // 프레임률
+                        if (report.framesPerSecond !== undefined) {
+                            document.getElementById('stat-fps').textContent = report.framesPerSecond;
+                        }
+
+                        // 해상도
+                        if (report.frameWidth && report.frameHeight) {
+                            document.getElementById('stat-resolution').textContent =
+                                report.frameWidth + '×' + report.frameHeight;
+                        }
+
+                        // 패킷 손실률
+                        if (report.packetsLost !== undefined && report.packetsReceived > 0) {
+                            const lossRate = (report.packetsLost / (report.packetsReceived + report.packetsLost) * 100);
+                            document.getElementById('stat-packetloss').textContent = lossRate.toFixed(2);
+                        }
+
+                        // Jitter
+                        if (report.jitter !== undefined) {
+                            document.getElementById('stat-jitter').textContent = (report.jitter * 1000).toFixed(1);
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error('통계 수집 실패:', e);
+            }
         }
     </script>
 </body>

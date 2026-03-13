@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Monitor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+            background: #0a0a1a;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+        h1 { color: #e94560; margin-bottom: 20px; }
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 900px;
+        }
+        .card {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 20px;
+            border: 1px solid #1a1a3e;
+        }
+        .card h2 {
+            font-size: 16px;
+            color: #e94560;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #1a1a3e;
+        }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 14px;
+        }
+        .metric-label { color: #999; }
+        .metric-value { color: #4ecca3; font-weight: bold; }
+        .bar-container {
+            background: #0a0a1a;
+            border-radius: 4px;
+            height: 20px;
+            margin: 8px 0;
+            overflow: hidden;
+        }
+        .bar {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            padding-left: 8px;
+            font-size: 12px;
+            color: #fff;
+        }
+        .bar-green { background: linear-gradient(90deg, #2d6a4f, #4ecca3); }
+        .bar-yellow { background: linear-gradient(90deg, #6a5a2d, #e9c46a); }
+        .bar-red { background: linear-gradient(90deg, #6a2d2d, #e94560); }
+        .status-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status-running { background: #2d6a4f; color: #4ecca3; }
+        .status-stopped { background: #6a2d2d; color: #e94560; }
+        .refresh-info {
+            margin-top: 15px;
+            font-size: 12px;
+            color: #666;
+        }
+        a { color: #e94560; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .nav { margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div class="nav"><a href="/">← CCTV Streamer</a></div>
+    <h1>System Monitor</h1>
+
+    <div class="dashboard">
+        <!-- JVM -->
+        <div class="card">
+            <h2>Java (JVM)</h2>
+            <div class="metric">
+                <span class="metric-label">Heap 사용량</span>
+                <span class="metric-value" id="jvm-heap">-</span>
+            </div>
+            <div class="bar-container">
+                <div class="bar bar-green" id="jvm-heap-bar" style="width: 0%"></div>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Java CPU 사용량</span>
+                <span class="metric-value" id="jvm-cpu-process">-</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">시스템 전체 CPU Load</span>
+                <span class="metric-value" id="jvm-cpu">-</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">스레드 수</span>
+                <span class="metric-value" id="jvm-threads">-</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">프로세서</span>
+                <span class="metric-value" id="jvm-processors">-</span>
+            </div>
+        </div>
+
+        <!-- go2rtc -->
+        <div class="card">
+            <h2>go2rtc</h2>
+            <div class="metric">
+                <span class="metric-label">상태</span>
+                <span id="go2rtc-status">-</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">PID</span>
+                <span class="metric-value" id="go2rtc-pid">-</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">CPU 사용량</span>
+                <span class="metric-value" id="go2rtc-cpu">-</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">메모리 (RSS)</span>
+                <span class="metric-value" id="go2rtc-mem">-</span>
+            </div>
+            <div class="bar-container">
+                <div class="bar bar-green" id="go2rtc-mem-bar" style="width: 0%"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="refresh-info">3초마다 자동 갱신</div>
+
+    <script>
+        async function fetchStats() {
+            try {
+                const res = await fetch('/api/monitor');
+                const data = await res.json();
+
+                // JVM
+                const jvm = data.jvm;
+                document.getElementById('jvm-heap').textContent =
+                    `${jvm.heapUsedMB} MB / ${jvm.heapMaxMB} MB (${jvm.heapUsagePercent}%)`;
+                document.getElementById('jvm-cpu-process').textContent =
+                    jvm.cpuPercent !== undefined ? jvm.cpuPercent + '%' : '-';
+                document.getElementById('jvm-cpu').textContent = jvm.systemCpuLoad;
+                document.getElementById('jvm-threads').textContent = jvm.threadCount;
+                document.getElementById('jvm-processors').textContent = jvm.availableProcessors + '코어';
+
+                const heapBar = document.getElementById('jvm-heap-bar');
+                heapBar.style.width = jvm.heapUsagePercent + '%';
+                heapBar.textContent = jvm.heapUsagePercent + '%';
+                heapBar.className = 'bar ' +
+                    (jvm.heapUsagePercent > 80 ? 'bar-red' : jvm.heapUsagePercent > 50 ? 'bar-yellow' : 'bar-green');
+
+                // go2rtc
+                const g = data.go2rtc;
+                const statusEl = document.getElementById('go2rtc-status');
+                if (g.running) {
+                    statusEl.innerHTML = '<span class="status-badge status-running">RUNNING</span>';
+                } else {
+                    statusEl.innerHTML = '<span class="status-badge status-stopped">STOPPED</span>';
+                }
+                document.getElementById('go2rtc-pid').textContent = g.pid > 0 ? g.pid : '-';
+                document.getElementById('go2rtc-cpu').textContent = g.cpuPercent !== undefined ? g.cpuPercent + '%' : '-';
+                document.getElementById('go2rtc-mem').textContent = g.rssMB !== undefined ? g.rssMB + ' MB' : '-';
+
+                const memBar = document.getElementById('go2rtc-mem-bar');
+                if (g.rssMB !== undefined) {
+                    // 256MB 기준으로 바 표시 (go2rtc는 보통 매우 적게 씀)
+                    const memPercent = Math.min(Math.round(g.rssMB / 256 * 100), 100);
+                    memBar.style.width = memPercent + '%';
+                    memBar.textContent = g.rssMB + ' MB';
+                    memBar.className = 'bar ' +
+                        (memPercent > 80 ? 'bar-red' : memPercent > 50 ? 'bar-yellow' : 'bar-green');
+                }
+
+            } catch (e) {
+                console.error('모니터링 데이터 로드 실패:', e);
+            }
+        }
+
+        fetchStats();
+        setInterval(fetchStats, 3000);
+    </script>
+</body>
+</html>

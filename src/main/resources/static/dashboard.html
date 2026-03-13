@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCTV Dashboard - 40CH</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0a0a1a;
+            color: #eee;
+            overflow-x: hidden;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 20px;
+            background: #16213e;
+            border-bottom: 1px solid #1a1a3e;
+        }
+        .header h1 { font-size: 18px; color: #e94560; }
+        .header-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            font-size: 13px;
+        }
+        .header-controls a { color: #e94560; text-decoration: none; }
+        button {
+            padding: 6px 14px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            background: #e94560;
+            color: #fff;
+        }
+        button:hover { background: #c73e54; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        .stats {
+            padding: 6px 14px;
+            background: #1a1a2e;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #4ecca3;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 2px;
+            padding: 2px;
+        }
+        .cell {
+            position: relative;
+            background: #111;
+            aspect-ratio: 16/9;
+            overflow: hidden;
+            cursor: pointer;
+            border: 1px solid #1a1a3e;
+        }
+        .cell:hover { border-color: #e94560; }
+        .cell video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .cell .label {
+            position: absolute;
+            top: 4px;
+            left: 6px;
+            font-size: 11px;
+            background: rgba(0,0,0,0.7);
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #4ecca3;
+        }
+        .cell .status-dot {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .dot-connected { background: #4ecca3; }
+        .dot-disconnected { background: #e94560; }
+        .dot-connecting { background: #e9c46a; }
+
+        /* 풀스크린 모달 */
+        .fullscreen-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        .fullscreen-overlay.active { display: flex; }
+        .fullscreen-overlay video {
+            max-width: 90%;
+            max-height: 85vh;
+            border-radius: 8px;
+        }
+        .fullscreen-overlay .close-btn {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            font-size: 24px;
+            background: none;
+            color: #fff;
+            cursor: pointer;
+        }
+        .fullscreen-overlay .cam-title {
+            margin-top: 10px;
+            font-size: 16px;
+            color: #4ecca3;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>CCTV Dashboard - 40CH</h1>
+        <div class="header-controls">
+            <div class="stats" id="stats">연결: 0/40</div>
+            <button onclick="connectAll()">전체 연결</button>
+            <button onclick="disconnectAll()">전체 해제</button>
+            <a href="/">단일 뷰</a>
+            <a href="/monitor.html">모니터</a>
+        </div>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <div class="fullscreen-overlay" id="fullscreen">
+        <button class="close-btn" onclick="closeFullscreen()">✕</button>
+        <video id="fullscreen-video" autoplay muted playsinline></video>
+        <div class="cam-title" id="fullscreen-title"></div>
+    </div>
+
+    <script>
+        const TOTAL = 40;
+        const peerConnections = {};
+        let connectedCount = 0;
+
+        // 그리드 생성
+        const grid = document.getElementById('grid');
+        for (let i = 1; i <= TOTAL; i++) {
+            const id = 'emu' + String(i).padStart(2, '0');
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            cell.id = 'cell-' + id;
+            cell.onclick = () => openFullscreen(id);
+            cell.innerHTML = `
+                <video id="video-${id}" autoplay muted playsinline></video>
+                <div class="label">${id}</div>
+                <div class="status-dot dot-disconnected" id="dot-${id}"></div>
+            `;
+            grid.appendChild(cell);
+        }
+
+        async function connectCamera(cameraId) {
+            const dot = document.getElementById('dot-' + cameraId);
+            dot.className = 'status-dot dot-connecting';
+
+            try {
+                const pc = new RTCPeerConnection();
+                peerConnections[cameraId] = pc;
+
+                pc.ontrack = (event) => {
+                    document.getElementById('video-' + cameraId).srcObject = event.streams[0];
+                    dot.className = 'status-dot dot-connected';
+                    connectedCount++;
+                    updateStats();
+                };
+
+                pc.oniceconnectionstatechange = () => {
+                    if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+                        dot.className = 'status-dot dot-disconnected';
+                        connectedCount = Math.max(0, connectedCount - 1);
+                        updateStats();
+                    }
+                };
+
+                pc.addTransceiver('video', { direction: 'recvonly' });
+
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                if (pc.iceGatheringState !== 'complete') {
+                    await new Promise(resolve => {
+                        pc.onicegatheringstatechange = () => {
+                            if (pc.iceGatheringState === 'complete') resolve();
+                        };
+                    });
+                }
+
+                const response = await fetch(`/api/cameras/${cameraId}/webrtc`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: pc.localDescription.type,
+                        sdp: pc.localDescription.sdp
+                    })
+                });
+
+                if (!response.ok) throw new Error('서버 오류: ' + response.status);
+
+                const answer = await response.json();
+                await pc.setRemoteDescription(answer);
+
+            } catch (e) {
+                console.error(`${cameraId} 연결 실패:`, e);
+                dot.className = 'status-dot dot-disconnected';
+            }
+        }
+
+        function disconnectCamera(cameraId) {
+            if (peerConnections[cameraId]) {
+                peerConnections[cameraId].close();
+                delete peerConnections[cameraId];
+            }
+            const video = document.getElementById('video-' + cameraId);
+            if (video) video.srcObject = null;
+            const dot = document.getElementById('dot-' + cameraId);
+            if (dot) dot.className = 'status-dot dot-disconnected';
+        }
+
+        async function connectAll() {
+            // 순차적으로 연결 (동시에 40개 요청하면 부하 큼)
+            for (let i = 1; i <= TOTAL; i++) {
+                const id = 'emu' + String(i).padStart(2, '0');
+                await connectCamera(id);
+                // 약간의 딜레이로 서버 부하 분산
+                await new Promise(r => setTimeout(r, 200));
+            }
+        }
+
+        function disconnectAll() {
+            connectedCount = 0;
+            for (let i = 1; i <= TOTAL; i++) {
+                const id = 'emu' + String(i).padStart(2, '0');
+                disconnectCamera(id);
+            }
+            updateStats();
+        }
+
+        function updateStats() {
+            document.getElementById('stats').textContent = `연결: ${connectedCount}/${TOTAL}`;
+        }
+
+        // 풀스크린
+        function openFullscreen(cameraId) {
+            const video = document.getElementById('video-' + cameraId);
+            const fsVideo = document.getElementById('fullscreen-video');
+            if (video && video.srcObject) {
+                fsVideo.srcObject = video.srcObject;
+            }
+            document.getElementById('fullscreen-title').textContent = cameraId;
+            document.getElementById('fullscreen').classList.add('active');
+        }
+
+        function closeFullscreen() {
+            document.getElementById('fullscreen').classList.remove('active');
+            document.getElementById('fullscreen-video').srcObject = null;
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeFullscreen();
+        });
+    </script>
+</body>
+</html>

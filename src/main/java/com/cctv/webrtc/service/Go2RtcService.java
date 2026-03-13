@@ -19,8 +19,8 @@ public class Go2RtcService {
 	private final String apiUrl;
 
 	public Go2RtcService(AppProperties properties) {
-		this.httpClient = HttpClient.newHttpClient();
-		this.apiUrl = properties.go2rtc().apiUrl();
+		this.httpClient = HttpClient.newHttpClient();   // Java 내장 HTTP 클라이언트
+		this.apiUrl = properties.go2rtc().apiUrl();     // localhost:1984 → application.yml 파일 참조하는 구조
 	}
 
 	/**
@@ -35,7 +35,7 @@ public class Go2RtcService {
 				.build();
 
 			HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
+			
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
 				log.error("go2rtc webrtc offer failed: status={}, body={}", response.statusCode(), response.body());
 				throw new RuntimeException("go2rtc returned " + response.statusCode());
