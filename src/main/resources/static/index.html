@@ -4,82 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CCTV Streamer</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #1a1a2e;
-            color: #eee;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 20px;
-        }
-        h1 { margin-bottom: 20px; color: #e94560; }
-        .controls {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            align-items: center;
-        }
-        select, button {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            cursor: pointer;
-        }
-        select { background: #16213e; color: #eee; }
-        button { background: #e94560; color: #fff; }
-        button:hover { background: #c73e54; }
-        button:disabled { background: #555; cursor: not-allowed; }
-        #status {
-            margin-bottom: 10px;
-            padding: 6px 12px;
-            border-radius: 4px;
-            font-size: 13px;
-        }
-        .connected { background: #2d6a4f; }
-        .disconnected { background: #6a2d2d; }
-        .connecting { background: #6a5a2d; }
-        video {
-            width: 100%;
-            max-width: 960px;
-            background: #000;
-            border-radius: 8px;
-        }
-        .stats-panel {
-            width: 100%;
-            max-width: 960px;
-            margin-top: 15px;
-            background: #16213e;
-            border-radius: 8px;
-            padding: 15px;
-            display: none;
-        }
-        .stats-panel h3 {
-            color: #e94560;
-            font-size: 14px;
-            margin-bottom: 10px;
-            padding-bottom: 6px;
-            border-bottom: 1px solid #1a1a3e;
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 10px;
-        }
-        .stat-item {
-            background: #0a0a1a;
-            border-radius: 6px;
-            padding: 10px;
-            text-align: center;
-        }
-        .stat-label { font-size: 11px; color: #999; margin-bottom: 4px; }
-        .stat-value { font-size: 18px; color: #4ecca3; font-weight: bold; }
-        .stat-unit { font-size: 11px; color: #666; }
-        .connection-type { font-size: 12px; color: #999; margin-top: 10px; }
-    </style>
+    <link rel="stylesheet" href="/css/index.css">
 </head>
 <body>
     <h1>CCTV Streamer</h1>
@@ -96,13 +21,24 @@
         <button id="connectBtn" onclick="connect()">연결</button>
         <button id="disconnectBtn" onclick="disconnect()" disabled>해제</button>
     </div>
+    <div class="controls" style="font-size: 13px;">
+        <label><input type="radio" name="streamMode" value="webrtc" checked> WebRTC (저지연)</label>
+        <label><input type="radio" name="streamMode" value="hls"> HLS (HTTP, 안정적)</label>
+        <label><input type="radio" name="streamMode" value="webrtc-hls"> WebRTC + HLS Failover</label>
+    </div>
+    <div class="controls" style="font-size: 13px;" id="iceModePanel">
+        <label><input type="radio" name="iceMode" value="p2p" checked> P2P (직접 연결)</label>
+        <label><input type="radio" name="iceMode" value="turn"> TURN (중계 경유)</label>
+        <label><input type="radio" name="iceMode" value="relay"> TURN 강제 (P2P 차단)</label>
+        <label><input type="radio" name="iceMode" value="test" style="margin-left:10px"> 공개TURN 테스트</label>
+    </div>
 
     <div id="status" class="disconnected">연결 안 됨</div>
 
     <video id="video" autoplay muted playsinline></video>
 
     <div class="stats-panel" id="statsPanel">
-        <h3>WebRTC 연결 통계 (1초마다 갱신)</h3>
+        <h3 id="statsTitle">연결 통계 (1초마다 갱신)</h3>
         <div class="stats-grid">
             <div class="stat-item">
                 <div class="stat-label">지연시간 (RTT)</div>
@@ -128,189 +64,14 @@
                 <div class="stat-label">패킷 손실</div>
                 <div><span class="stat-value" id="stat-packetloss">-</span> <span class="stat-unit">%</span></div>
             </div>
+            <div class="stat-item">
+                <div class="stat-label">드롭 프레임</div>
+                <div><span class="stat-value" id="stat-dropped">-</span> <span class="stat-unit">frames</span></div>
+            </div>
         </div>
         <div class="connection-type" id="stat-connection">연결 방식: -</div>
     </div>
 
-    <script>
-        let pc = null;
-        let statsInterval = null;
-        let prevBytesReceived = 0;
-        let prevTimestamp = 0;
-        const video = document.getElementById('video');
-        const status = document.getElementById('status');
-        const connectBtn = document.getElementById('connectBtn');
-        const disconnectBtn = document.getElementById('disconnectBtn');
-        const statsPanel = document.getElementById('statsPanel');
-
-        async function connect() {
-            const cameraId = document.getElementById('cameraSelect').value;
-
-            setStatus('연결 중...', 'connecting');
-            connectBtn.disabled = true;
-
-            try {
-                pc = new RTCPeerConnection();
-
-                pc.ontrack = (event) => {
-                    video.srcObject = event.streams[0];
-                    setStatus('연결됨 - ' + cameraId, 'connected');
-                    disconnectBtn.disabled = false;
-                };
-
-                pc.oniceconnectionstatechange = () => {
-                    if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-                        setStatus('연결 끊김', 'disconnected');
-                        disconnect();
-                    }
-                };
-
-                pc.addTransceiver('video', { direction: 'recvonly' });
-                pc.addTransceiver('audio', { direction: 'recvonly' });
-
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-
-                // ICE gathering 완료 대기
-                if (pc.iceGatheringState !== 'complete') {
-                    await new Promise(resolve => {
-                        pc.onicegatheringstatechange = () => {
-                            if (pc.iceGatheringState === 'complete') resolve();
-                        };
-                    });
-                }
-
-                // Java 서버에 SDP offer 전송
-                const response = await fetch(`/api/cameras/${cameraId}/webrtc`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        type: pc.localDescription.type,
-                        sdp: pc.localDescription.sdp
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error('서버 응답 오류: ' + response.status);
-                }
-
-                const answer = await response.json();
-                await pc.setRemoteDescription(answer);
-
-                // WebRTC 통계 수집 시작
-                startStats();
-
-            } catch (e) {
-                console.error('연결 실패:', e);
-                setStatus('연결 실패: ' + e.message, 'disconnected');
-                connectBtn.disabled = false;
-                disconnect();
-            }
-        }
-
-        function disconnect() {
-            stopStats();
-            if (pc) {
-                pc.close();
-                pc = null;
-            }
-            video.srcObject = null;
-            setStatus('연결 안 됨', 'disconnected');
-            connectBtn.disabled = false;
-            disconnectBtn.disabled = true;
-            statsPanel.style.display = 'none';
-        }
-
-        function setStatus(text, className) {
-            status.textContent = text;
-            status.className = className;
-        }
-
-        // WebRTC 통계 수집
-        function startStats() {
-            prevBytesReceived = 0;
-            prevTimestamp = 0;
-            statsPanel.style.display = 'block';
-            statsInterval = setInterval(collectStats, 1000);
-        }
-
-        function stopStats() {
-            if (statsInterval) {
-                clearInterval(statsInterval);
-                statsInterval = null;
-            }
-        }
-
-        async function collectStats() {
-            if (!pc) return;
-
-            try {
-                const stats = await pc.getStats();
-
-                stats.forEach(report => {
-                    // 연결 후보쌍 (RTT, 연결 방식)
-                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                        const rtt = report.currentRoundTripTime;
-                        if (rtt !== undefined) {
-                            document.getElementById('stat-rtt').textContent = (rtt * 1000).toFixed(1);
-                        }
-
-                        // 연결 방식 표시 (P2P인지 TURN인지)
-                        const localId = report.localCandidateId;
-                        const remoteId = report.remoteCandidateId;
-                        stats.forEach(c => {
-                            if (c.id === localId && c.type === 'local-candidate') {
-                                const type = c.candidateType; // host, srflx, relay
-                                let label = 'P2P 직접 연결';
-                                if (type === 'relay') label = 'TURN 중계 연결';
-                                else if (type === 'srflx') label = 'STUN 반사 연결';
-                                document.getElementById('stat-connection').textContent =
-                                    `연결 방식: ${label} (${type}) | ${c.protocol?.toUpperCase() || ''}`;
-                            }
-                        });
-                    }
-
-                    // 수신 영상 통계 (비트레이트, 프레임, 해상도, 패킷손실, jitter)
-                    if (report.type === 'inbound-rtp' && report.kind === 'video') {
-                        // 비트레이트 계산
-                        if (prevTimestamp > 0) {
-                            const byteDiff = report.bytesReceived - prevBytesReceived;
-                            const timeDiff = (report.timestamp - prevTimestamp) / 1000;
-                            if (timeDiff > 0) {
-                                const kbps = Math.round((byteDiff * 8) / timeDiff / 1000);
-                                document.getElementById('stat-bitrate').textContent = kbps;
-                            }
-                        }
-                        prevBytesReceived = report.bytesReceived;
-                        prevTimestamp = report.timestamp;
-
-                        // 프레임률
-                        if (report.framesPerSecond !== undefined) {
-                            document.getElementById('stat-fps').textContent = report.framesPerSecond;
-                        }
-
-                        // 해상도
-                        if (report.frameWidth && report.frameHeight) {
-                            document.getElementById('stat-resolution').textContent =
-                                report.frameWidth + '×' + report.frameHeight;
-                        }
-
-                        // 패킷 손실률
-                        if (report.packetsLost !== undefined && report.packetsReceived > 0) {
-                            const lossRate = (report.packetsLost / (report.packetsReceived + report.packetsLost) * 100);
-                            document.getElementById('stat-packetloss').textContent = lossRate.toFixed(2);
-                        }
-
-                        // Jitter
-                        if (report.jitter !== undefined) {
-                            document.getElementById('stat-jitter').textContent = (report.jitter * 1000).toFixed(1);
-                        }
-                    }
-                });
-            } catch (e) {
-                console.error('통계 수집 실패:', e);
-            }
-        }
-    </script>
+    <script src="/js/index.js"></script>
 </body>
 </html>
