@@ -1,0 +1,61 @@
+api:
+  listen: ":1984"
+  origin: "*"
+
+streams:
+  # 실제 카메라 (.env에서 환경변수 로드)
+  cam01: "rtsp://${CAM_RTSP_USER}:${CAM_RTSP_PASS}@${CAM_IP}:554/Streaming/channels/101/"
+  cam01_sub: "rtsp://${CAM_RTSP_USER}:${CAM_RTSP_PASS}@${CAM_IP}:554/Streaming/channels/102/"
+
+  # 에뮬레이터 (mediamtx에서 RTSP pull)
+  emu01: "rtsp://localhost:8553/emu01"
+  emu02: "rtsp://localhost:8553/emu02"
+  emu03: "rtsp://localhost:8553/emu03"
+  emu04: "rtsp://localhost:8553/emu04"
+  emu05: "rtsp://localhost:8553/emu05"
+  emu06: "rtsp://localhost:8553/emu06"
+  emu07: "rtsp://localhost:8553/emu07"
+  emu08: "rtsp://localhost:8553/emu08"
+  emu09: "rtsp://localhost:8553/emu09"
+  emu10: "rtsp://localhost:8553/emu10"
+  emu11: "rtsp://localhost:8553/emu11"
+  emu12: "rtsp://localhost:8553/emu12"
+  emu13: "rtsp://localhost:8553/emu13"
+  emu14: "rtsp://localhost:8553/emu14"
+  emu15: "rtsp://localhost:8553/emu15"
+  emu16: "rtsp://localhost:8553/emu16"
+  emu17: "rtsp://localhost:8553/emu17"
+  emu18: "rtsp://localhost:8553/emu18"
+  emu19: "rtsp://localhost:8553/emu19"
+  emu20: "rtsp://localhost:8553/emu20"
+  emu21: "rtsp://localhost:8553/emu21"
+  emu22: "rtsp://localhost:8553/emu22"
+  emu23: "rtsp://localhost:8553/emu23"
+  emu24: "rtsp://localhost:8553/emu24"
+  emu25: "rtsp://localhost:8553/emu25"
+  emu26: "rtsp://localhost:8553/emu26"
+  emu27: "rtsp://localhost:8553/emu27"
+  emu28: "rtsp://localhost:8553/emu28"
+  emu29: "rtsp://localhost:8553/emu29"
+  emu30: "rtsp://localhost:8553/emu30"
+  emu31: "rtsp://localhost:8553/emu31"
+  emu32: "rtsp://localhost:8553/emu32"
+  emu33: "rtsp://localhost:8553/emu33"
+  emu34: "rtsp://localhost:8553/emu34"
+  emu35: "rtsp://localhost:8553/emu35"
+  emu36: "rtsp://localhost:8553/emu36"
+  emu37: "rtsp://localhost:8553/emu37"
+  emu38: "rtsp://localhost:8553/emu38"
+  emu39: "rtsp://localhost:8553/emu39"
+  emu40: "rtsp://localhost:8553/emu40"
+
+webrtc:
+  listen: ":8555"
+  ice_servers:
+    - urls: ["stun:${TURN_IP}:${TURN_PORT}"]
+    - urls: ["turn:${TURN_IP}:${TURN_PORT}"]
+      username: ${TURN_USER}
+      credential: ${TURN_PASS}
+
+rtsp:
+  listen: ":8554"

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1, minimum-scale=1, maximum-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>CCTV Embed</title>
+    <link rel="stylesheet" href="/css/embed.css">
+</head>
+<body>
+    <!-- 영상 영역 (전체화면) -->
+    <header class="viewer">
+        <video id="video" autoplay playsinline muted></video>
+    </header>
+
+    <!-- 상태 오버레이 -->
+    <div id="overlay" class="overlay">
+        <span id="status">연결 중...</span>
+    </div>
+
+    <!-- 스트리밍 모드 배지 -->
+    <div id="modeBadge" class="mode-badge hidden"></div>
+
+    <main>
+        <!-- 하단 토글 버튼 (기본 표시) -->
+        <button id="openBtn" class="open-btn" onclick="togglePanel(true)">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+        </button>
+
+        <!-- 닫기 버튼 (패널 열릴 때) -->
+        <button id="closeBtn" class="close-btn hidden" onclick="togglePanel(false)">&#x2715;</button>
+
+        <!-- 하단 컨트롤 패널 -->
+        <div id="controlPanel" class="control-panel hidden">
+            <!-- 스트리밍 모드 선택 -->
+            <div class="ctrl-group">
+                <div class="ctrl-label">스트림</div>
+                <div class="stream-modes">
+                    <button class="mode-btn active" data-mode="webrtc-hls" onclick="switchMode(this)">Auto</button>
+                    <button class="mode-btn" data-mode="webrtc" onclick="switchMode(this)">WebRTC</button>
+                    <button class="mode-btn" data-mode="hls" onclick="switchMode(this)">HLS</button>
+                </div>
+            </div>
+
+            <!-- PTZ 방향 -->
+            <div class="ctrl-group">
+                <div class="ctrl-label">PTZ</div>
+                <div class="ptz-pad">
+                    <button class="ptz-btn ptz-up" onclick="ptzCtrl(0,40,0)">&#x25B2;</button>
+                    <button class="ptz-btn ptz-left" onclick="ptzCtrl(-30,0,0)">&#x25C0;</button>
+                    <button class="ptz-btn ptz-stop" onclick="ptzCtrl(0,0,0)">&#x25CF;</button>
+                    <button class="ptz-btn ptz-right" onclick="ptzCtrl(30,0,0)">&#x25B6;</button>
+                    <button class="ptz-btn ptz-down" onclick="ptzCtrl(0,-40,0)">&#x25BC;</button>
+                </div>
+            </div>
+
+            <!-- 줌 -->
+            <div class="ctrl-group">
+                <div class="ctrl-label">줌</div>
+                <div class="zoom-ctrl">
+                    <button class="ctrl-btn" onclick="ptzCtrl(0,0,-1)">&#x2212;</button>
+                    <button class="ctrl-btn" onclick="ptzCtrl(0,0,1)">&#x002B;</button>
+                </div>
+            </div>
+
+            <!-- 전체화면 -->
+            <div class="ctrl-group">
+                <div class="ctrl-label">화면</div>
+                <button class="ctrl-btn" onclick="toggleFullscreen()">&#x26F6;</button>
+            </div>
+        </div>
+    </main>
+
+    <script src="/js/embed.js"></script>
+</body>
+</html>
