@@ -14,8 +14,17 @@ spring:
 server:
   port: 8085
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+  endpoint:
+    health:
+      show-details: always
+
 app:
   go2rtc:
     binary: ./go2rtc
-    config: ./go2rtc.yaml
+    config: ./go2rtc.yml
     api-url: http://localhost:1984

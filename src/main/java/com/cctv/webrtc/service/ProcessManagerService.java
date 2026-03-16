@@ -12,6 +12,10 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.file.Path;
 
+/**
+ * go2rtc 프로세스 관리자
+ * Spring Boot가 시작되면 go2rtc 바이너리를 자동 실행하고, 죽으면 재시작해주는 애
+ */
 @Service
 public class ProcessManagerService {
 
@@ -20,6 +24,7 @@ public class ProcessManagerService {
 	private final String binaryPath;
 	private final String configPath;
 	private Process process;
+	// 사용자가 의도대로 종료하는 거라는 flag, 해당 flag가 없으면 Spring Boot 종료시 go2rtc가 꺼지는데 이때, "비정상 종료"로 인식해서 재시작하려고 함 
 	private volatile boolean shuttingDown = false;
 
 	public ProcessManagerService(AppProperties properties) {
@@ -27,9 +32,9 @@ public class ProcessManagerService {
 		this.configPath = properties.go2rtc().config();
 	}
 
-	@EventListener(ApplicationReadyEvent.class)
+	@EventListener(ApplicationReadyEvent.class) // Spring Boot가 완전이 뜨면 실행하도록 함
 	public void startGo2Rtc() {
-		launchProcess();
+		launchProcess(); // - go2rtc 실행
 	}
 
 	private void launchProcess() {
@@ -38,15 +43,16 @@ public class ProcessManagerService {
 			Path config = Path.of(configPath).toAbsolutePath();
 
 			log.info("Starting go2rtc: binary={}, config={}", binary, config);
-
+			
+			// 터미널에서 ./go2rtc -config ./go2rtc.yml 치는 것과 동일함
 			ProcessBuilder pb = new ProcessBuilder(binary.toString(), "-config", config.toString());
 			pb.redirectErrorStream(true);
 			process = pb.start();
 
-			// Virtual Thread로 go2rtc 로그 수집
+			// go2rtc 로그를 Spring 로그에 합쳐서 출력(Virtual Thread로 go2rtc 로그 수집하는 방식)
 			Thread.startVirtualThread(() -> collectLogs(process));
 
-			// 비정상 종료 시 재시작
+			// go2rtc가 갑자기 죽으면 5초 후 자동 재시작
 			process.onExit().thenAccept(p -> {
 				if (!shuttingDown) {
 					log.warn("go2rtc exited with code {}. Restarting in 5 seconds...", p.exitValue());
@@ -78,7 +84,8 @@ public class ProcessManagerService {
 		}
 	}
 
-	@PreDestroy
+
+	@PreDestroy // spring boot가 종료가 될 때, go2rtc도 같이 정리함(SIGTERM → 5초 대기 → 강제 종료)
 	public void stopGo2Rtc() {
 		shuttingDown = true;
 		if (process != null && process.isAlive()) {
@@ -102,4 +109,7 @@ public class ProcessManagerService {
 		return process != null && process.isAlive();
 	}
 
+	public long getPid() {
+		return (process != null && process.isAlive()) ? process.pid() : -1;
+	}
 }

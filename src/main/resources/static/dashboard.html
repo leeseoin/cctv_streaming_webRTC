@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCTV Dashboard - 40CH</title>
+    <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+    <div class="header">
+        <h1>CCTV Dashboard - 40CH</h1>
+        <div class="header-controls">
+            <div class="stats" id="stats">연결: 0/40</div>
+            <button onclick="connectAll()">전체 연결</button>
+            <button onclick="disconnectAll()">전체 해제</button>
+            <a href="/">단일 뷰</a>
+            <a href="/monitor.html">모니터</a>
+        </div>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <div class="fullscreen-overlay" id="fullscreen">
+        <button class="close-btn" onclick="closeFullscreen()">✕</button>
+        <video id="fullscreen-video" autoplay muted playsinline></video>
+        <div class="cam-title" id="fullscreen-title"></div>
+    </div>
+
+    <script src="/js/dashboard.js"></script>
+</body>
+</html>
