@@ -28,3 +28,8 @@ app:
     binary: ./go2rtc
     config: ./go2rtc.yml
     api-url: http://localhost:1984
+  camera:
+    ip: ${CAM_IP:192.168.0.80}
+    isapi-port: ${ISAPI_PORT:80}
+    isapi-user: ${CAM_RTSP_USER:admin}
+    isapi-pass: ${CAM_RTSP_PASS:admin}

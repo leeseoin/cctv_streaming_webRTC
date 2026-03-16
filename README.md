@@ -6,31 +6,35 @@ RTSP IP 카메라 영상을 WebRTC로 실시간 스트리밍하는 시스템.
 
 ## 기술 스택
 
-| 구분 | 기술 |
-|------|------|
-| Backend | Java 21 + Spring Boot 4.0.3 |
-| Media Gateway | go2rtc (remux 방식, 트랜스코딩 없음) |
-| Protocol | RTSP (카메라) → WebRTC (브라우저) |
-| Camera | Hikvision DS-2DE4A225IWG-E |
+| 구분          | 기술                                            |
+| ------------- | ----------------------------------------------- |
+| Backend       | Java 21 + Spring Boot 4.0.3                     |
+| Media Gateway | go2rtc (remux 방식, 트랜스코딩 없음)            |
+| Protocol      | RTSP (카메라) → WebRTC / HTTP Stream (브라우저) |
+| PTZ Control   | Hikvision ISAPI (Digest 인증)                   |
+| Camera        | Hikvision DS-2DE4A225IWG-E                      |
 
 ---
 
-## 현재 구조 (1단계 - 단일 영상 스트리밍)
+## 현재 구조
 
 ```
-┌─────────┐      RTSP       ┌─────────┐     WebRTC      ┌──────────┐
-│  카메라   │ ──────────────→ │  go2rtc  │ ──────────────→ │  브라우저  │
-│(Hikvision)│   H.264 영상    │ (remux)  │   H.264 그대로  │          │
-└─────────┘                 └─────────┘                 └──────────┘
-                                 ↑
-                           ┌─────────────┐
-                           │ Java (Spring │
-                           │    Boot)     │
-                           ├─────────────┤
-                           │ 시그널링 프록시│ ← SDP offer/answer 전달
-                           │ go2rtc 관리  │ ← 프로세스 시작/종료
-                           │ 모니터링 API │ ← CPU/메모리 조회
-                           └─────────────┘
+                                    ┌──[WebRTC]──→ 브라우저 (LAN: 저지연 P2P)
+                                    │
+┌─────────┐      RTSP       ┌──────┤
+│  카메라   │ ──────────────→ │go2rtc├──[MP4]────→ 브라우저 (Failover: WebRTC 실패 시)
+│(Hikvision)│   H.264 영상    │(remux)│
+└─────────┘                 └──────┘
+     ↑ PTZ (ISAPI)                ↑
+     │                     ┌──────────────────┐
+     └─────────────────── │  Java (Spring Boot) │
+                           ├──────────────────┤
+                           │ 시그널링 프록시     │ ← SDP offer/answer
+                           │ go2rtc 관리       │ ← 프로세스 시작/종료
+                           │ 스트리밍 프록시     │ ← MP4 리버스 프록시
+                           │ PTZ 제어          │ ← Hikvision ISAPI
+                           │ 모니터링 API      │ ← CPU/메모리/WebRTC 통계
+                           └──────────────────┘
 ```
 
 ### 동작 흐름
@@ -85,14 +89,14 @@ go2rtc ──:8554──→ FFmpeg (녹화용 RTSP 리스트림)
 
 ### 핵심 변경점
 
-| 항목 | 현재 (1단계) | 목표 (최종) |
-|------|-------------|------------|
-| 카메라 수 | 1대 | N대 (런타임 CRUD) |
-| 프로토콜 | WebRTC만 | WebRTC + HLS Failover |
-| 인증 | 없음 (전체 허용) | JWT 기반 인증 |
-| 녹화 | 없음 | FFmpeg으로 파일 저장 |
-| 모니터링 | JVM + go2rtc 기본 | WebRTC 통계 (RTT, 비트레이트) 포함 |
-| TURN | 없음 | coturn (Docker, 선택) |
+| 항목      | 현재                             | 목표 (최종)            |
+| --------- | -------------------------------- | ---------------------- |
+| 카메라 수 | 1대 (+ 40대 에뮬레이터)          | N대 (런타임 CRUD)      |
+| 프로토콜  | WebRTC + HTTP Stream Failover ✅ | —                      |
+| PTZ       | Hikvision ISAPI ✅               | ONVIF (다제조사 지원)  |
+| 인증      | 없음 (전체 허용)                 | Spring Security + 세션 |
+| 녹화      | 없음                             | FFmpeg으로 파일 저장   |
+| 모니터링  | JVM + go2rtc + WebRTC 통계 ✅    | —                      |
 
 ---
 
@@ -102,6 +106,7 @@ go2rtc ──:8554──→ FFmpeg (녹화용 RTSP 리스트림)
 
 - Java 21+
 - go2rtc 바이너리 (프로젝트 루트에 위치)
+- `.env` 파일
 
 ### 실행
 
@@ -112,11 +117,12 @@ cd /Users/iseoin/SpringBoot_project/webrtc
 
 ### 접속
 
-| URL | 설명 |
-|-----|------|
-| `localhost:8085` | 단일 카메라 플레이어 (WebRTC 통계 포함) |
-| `localhost:8085/dashboard.html` | 40채널 대시보드 |
-| `localhost:8085/monitor.html` | 시스템 모니터링 (CPU/메모리) |
+| URL                                   | 설명                                    |
+| ------------------------------------- | --------------------------------------- |
+| `localhost:8085`                      | 단일 카메라 플레이어 (WebRTC 통계 포함) |
+| `localhost:8085/embed.html?cam=cam01` | iframe 임베딩용 뷰어 (PTZ + 모드 선택)  |
+| `localhost:8085/dashboard.html`       | 40채널 대시보드                         |
+| `localhost:8085/monitor.html`         | 시스템 모니터링 (CPU/메모리)            |
 
 ### 에뮬레이터 테스트 (카메라 없이 40채널)
 
@@ -146,14 +152,15 @@ webrtc/
 ├── start-emulators.sh              # 에뮬레이터 시작
 ├── stop-emulators.sh               # 에뮬레이터 종료
 │
+├── .env                            # 환경변수 (Git 미포함)
 ├── src/main/java/com/cctv/webrtc/
 │   ├── config/                     # SecurityConfig, AppProperties
-│   ├── controller/                 # WebRtcController, MonitorController
-│   └── service/                    # Go2RtcService, ProcessManagerService
+│   ├── controller/                 # WebRtcController, PtzController, MonitorController, Go2RtcProxyController
+│   └── service/                    # Go2RtcService, PtzService, ProcessManagerService
 │
 ├── src/main/resources/
 │   ├── application.yml
-│   └── static/                     # index.html, dashboard.html, monitor.html
+│   └── static/                     # index, embed, dashboard, monitor (.html/.css/.js)
 │
 └── docs/                           # 문서 (CLAUDE.md 참조)
 ```
@@ -167,4 +174,5 @@ webrtc/
 - `docs/architecture/CORE_CONCEPTS.md` — 프로토콜, 코덱, Remux 등 핵심 개념
 - `docs/architecture/EMULATOR.md` — 에뮬레이터 구성/실행 가이드
 - `docs/reports/go2rtc_검증_보고서.md` — go2rtc CRUD, Remux 검증, HLS Failover 분석
+- `docs/architecture/HIKVISION_AUTH.md` — Hikvision ISAPI vs ONVIF 인증 체계
 - `docs/TODO.md` — 개발 단계별 할 일 목록
