@@ -93,6 +93,25 @@ button:disabled { background: #555; cursor: not-allowed; }
 .badge-webrtc { background: #4ecca3; color: #000; }
 .badge-hls { background: #e9c46a; color: #000; }
 
+/* 모드 선택 */
+.mode-switch { display: flex; gap: 2px; }
+.mode-btn {
+    padding: 6px 12px;
+    background: #1a1a2e;
+    border: 1px solid #333;
+    color: #888;
+}
+.mode-btn.active {
+    background: #e94560;
+    border-color: #e94560;
+    color: #fff;
+}
+.btn-test {
+    background: #e9c46a;
+    color: #000;
+}
+.btn-test:hover { background: #d4b04a; }
+
 /* 풀스크린 모달 */
 .fullscreen-overlay {
     display: none;

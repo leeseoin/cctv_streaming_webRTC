@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="54.2" height="46.659" viewBox="0 0 54.2 46.659">
+    <g transform="translate(2.083 2.815)">
+        <ellipse cx="7.5" cy="8.5" rx="7.5" ry="8.5" transform="translate(18.348 11.794)" style="fill:none;stroke:#fff;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;stroke-width:4px"/>
+        <path d="M4 26.018a19.611 19.611 0 0 1-2.921-5.853 24.215 24.215 0 0 1 0-14.313A19.611 19.611 0 0 1 4 0" transform="translate(9.006 7.005)" style="fill:none;stroke:#fff;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;stroke-width:4px"/>
+        <path data-name="Path" d="M0 0a19.611 19.611 0 0 1 2.921 5.853 24.215 24.215 0 0 1 0 14.313A19.611 19.611 0 0 1 0 26.018" transform="translate(37.026 7.005)" style="fill:none;stroke:#fff;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;stroke-width:4px"/>
+        <path data-name="Path" d="M7 41.029a30.229 30.229 0 0 1-5.125-9.221 34.869 34.869 0 0 1 0-22.586A30.229 30.229 0 0 1 7 0" style="fill:none;stroke:#fff;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;stroke-width:4px"/>
+        <path data-name="Path" d="M0 0a30.229 30.229 0 0 1 5.125 9.221 34.869 34.869 0 0 1 0 22.586A30.229 30.229 0 0 1 0 41.029" transform="translate(43.03)" style="fill:none;stroke:#fff;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;stroke-width:4px"/>
+    </g>
+</svg>

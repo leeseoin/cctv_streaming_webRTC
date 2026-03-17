@@ -10,9 +10,14 @@
     <div class="header">
         <h1>CCTV Dashboard - 40CH</h1>
         <div class="header-controls">
+            <div class="mode-switch">
+                <button class="mode-btn active" data-mode="webrtc" onclick="setStreamMode(this)">WebRTC</button>
+                <button class="mode-btn" data-mode="hls" onclick="setStreamMode(this)">HLS</button>
+            </div>
             <div class="stats" id="stats">연결: 0/40</div>
             <button onclick="connectAll()">전체 연결</button>
             <button onclick="disconnectAll()">전체 해제</button>
+            <button class="btn-test" onclick="testFailover()">Failover 테스트</button>
             <a href="/">단일 뷰</a>
             <a href="/monitor.html">모니터</a>
         </div>

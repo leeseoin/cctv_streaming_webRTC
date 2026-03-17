@@ -1,76 +1,103 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1, minimum-scale=1, maximum-scale=1">
-    <meta name="apple-mobile-web-app-capable" content="yes">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>CCTV Embed</title>
-    <link rel="stylesheet" href="/css/embed.css">
-</head>
-<body>
+    <link rel="stylesheet" href="/css/embed.css" />
+  </head>
+  <body>
     <!-- 영상 영역 (전체화면) -->
     <header class="viewer">
-        <video id="video" autoplay playsinline muted></video>
+      <video id="video" autoplay playsinline muted></video>
     </header>
 
     <!-- 상태 오버레이 -->
     <div id="overlay" class="overlay">
-        <span id="status">연결 중...</span>
+      <span id="status">연결 중...</span>
     </div>
 
     <!-- 스트리밍 모드 배지 -->
-    <div id="modeBadge" class="mode-badge hidden"></div>
+    <div id="modeBadge" class="mode-badge"></div>
 
     <main>
-        <!-- 하단 토글 버튼 (기본 표시) -->
-        <button id="openBtn" class="open-btn" onclick="togglePanel(true)">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+      <div class="container">
+        <!-- 하단 중앙 위쪽 화살표 (2단계: 패널 열기) -->
+        <button id="angleUp" class="angle-btn angle-up" onclick="setPanel(3)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" /></svg>
         </button>
 
-        <!-- 닫기 버튼 (패널 열릴 때) -->
-        <button id="closeBtn" class="close-btn hidden" onclick="togglePanel(false)">&#x2715;</button>
+        <!-- 하단 중앙 아래쪽 화살표 (3단계: 패널 접기) -->
+        <button id="angleDown" class="angle-btn angle-down" onclick="setPanel(2)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" /></svg>
+        </button>
 
-        <!-- 하단 컨트롤 패널 -->
-        <div id="controlPanel" class="control-panel hidden">
-            <!-- 스트리밍 모드 선택 -->
-            <div class="ctrl-group">
-                <div class="ctrl-label">스트림</div>
-                <div class="stream-modes">
-                    <button class="mode-btn active" data-mode="webrtc-hls" onclick="switchMode(this)">Auto</button>
-                    <button class="mode-btn" data-mode="webrtc" onclick="switchMode(this)">WebRTC</button>
-                    <button class="mode-btn" data-mode="hls" onclick="switchMode(this)">HLS</button>
-                </div>
-            </div>
+        <!-- 하단 컨트롤 패널 (3단계) -->
+        <div id="controlPanel" class="control-panel">
+          <!-- PTZ 방향 (nexbean 동일) -->
+          <div id="box-ptz" class="func-box1">
+            <button class="ptz-button" style="left: 5%; top: 30%; bottom: 30%" onclick="ptzCtrl(-30, 0, 0)"><img src="/img/btn_left.svg" style="width: 1vw" /></button>
+            <button class="ptz-button" style="left: 30%; right: 30%; top: 5%" onclick="ptzCtrl(0, 40, 0)"><img src="/img/btn_up.svg" style="width: 3vh" /></button>
+            <button class="ptz-button" style="left: 30%; right: 30%; top: 30%; bottom: 30%" onclick="ptzCtrl(0, 0, 0)"><img src="/img/btn_stop.svg" style="width: 4vh" /></button>
+            <button class="ptz-button" style="left: 30%; right: 30%; bottom: 5%" onclick="ptzCtrl(0, -40, 0)"><img src="/img/btn_down.svg" style="width: 3vh" /></button>
+            <button class="ptz-button" style="right: 5%; top: 30%; bottom: 30%" onclick="ptzCtrl(30, 0, 0)"><img src="/img/btn_right.svg" style="width: 1vw" /></button>
+          </div>
 
-            <!-- PTZ 방향 -->
-            <div class="ctrl-group">
-                <div class="ctrl-label">PTZ</div>
-                <div class="ptz-pad">
-                    <button class="ptz-btn ptz-up" onclick="ptzCtrl(0,40,0)">&#x25B2;</button>
-                    <button class="ptz-btn ptz-left" onclick="ptzCtrl(-30,0,0)">&#x25C0;</button>
-                    <button class="ptz-btn ptz-stop" onclick="ptzCtrl(0,0,0)">&#x25CF;</button>
-                    <button class="ptz-btn ptz-right" onclick="ptzCtrl(30,0,0)">&#x25B6;</button>
-                    <button class="ptz-btn ptz-down" onclick="ptzCtrl(0,-40,0)">&#x25BC;</button>
-                </div>
-            </div>
+          <!-- 줌 (nexbean 동일) -->
+          <div id="box-zoom" class="func-box1">
+            <button class="ptz-button" style="left: 5%; top: 30%; bottom: 30%" onclick="ptzCtrl(0, 0, -1)"><img src="/img/minus.svg" style="width: 4vh" /></button>
+            <button class="ptz-button" style="left: 30%; right: 30%; top: 5%; bottom: 5%" onclick="ptzCtrl(0, 0, 0)"><img src="/img/btn_stop.svg" style="width: 4vh" /><span class="box-label">Zoom</span></button>
+            <button class="ptz-button" style="right: 5%; top: 30%; bottom: 30%" onclick="ptzCtrl(0, 0, 1)"><img src="/img/plus.svg" style="width: 4vh" /></button>
+          </div>
 
-            <!-- 줌 -->
-            <div class="ctrl-group">
-                <div class="ctrl-label">줌</div>
-                <div class="zoom-ctrl">
-                    <button class="ctrl-btn" onclick="ptzCtrl(0,0,-1)">&#x2212;</button>
-                    <button class="ctrl-btn" onclick="ptzCtrl(0,0,1)">&#x002B;</button>
-                </div>
-            </div>
+          <!-- 볼륨 (nexbean 동일 - 미구현) -->
+          <div id="box-volume" class="func-box1">
+            <button class="ptz-button disabled" style="left: 5%; top: 30%; bottom: 30%"><img src="/img/minus.svg" style="width: 4vh" /></button>
+            <button class="ptz-button disabled" style="left: 30%; right: 30%; top: 5%; bottom: 5%"><img src="/img/volume.svg" style="width: 3vh" /><span class="box-label">볼륨</span></button>
+            <button class="ptz-button disabled" style="right: 5%; top: 30%; bottom: 30%"><img src="/img/plus.svg" style="width: 4vh" /></button>
+          </div>
 
-            <!-- 전체화면 -->
-            <div class="ctrl-group">
-                <div class="ctrl-label">화면</div>
-                <button class="ctrl-btn" onclick="toggleFullscreen()">&#x26F6;</button>
-            </div>
+          <!-- TTS (nexbean 동일 - 미구현) -->
+          <div id="box-tts" class="func-box1 func-single">
+            <button class="btn-func disabled"><img src="/img/icon_smartbroadcast.svg" style="width: 5vh" /><span class="box-label">TTS</span></button>
+          </div>
+
+          <!-- 경고음 (nexbean 동일 - 미구현) -->
+          <div id="box-siren" class="func-box1 func-single">
+            <button class="btn-func disabled"><img src="/img/icon_siren2.svg" style="width: 4vh" /><span class="box-label">경고음</span></button>
+          </div>
+
+          <!-- 안전방송 (nexbean 동일 - 미구현) -->
+          <div id="box-broadcast" class="func-box1 func-single">
+            <button class="btn-func disabled"><img src="/img/icon_broadcast2.svg" style="width: 4vh" /><span class="box-label">안전방송</span></button>
+          </div>
         </div>
+
+        <!-- 우하단 열기 버튼 (1단계: 기본) -->
+        <div id="openBtn" class="btn-open" onclick="setPanel(2)">
+          <img src="/img/alt.svg" />
+        </div>
+
+        <!-- 우상단 닫기 버튼 (3단계) -->
+        <div id="closeBtn" class="btn-close" onclick="setPanel(0)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" /></svg>
+        </div>
+
+        <!-- 좌상단 새로고침 버튼 (2,3단계) -->
+        <div id="refreshBtn" class="btn-refresh" onclick="connect()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" /></svg>
+        </div>
+
+        <!-- 스트리밍 모드 선택 (좌상단, 새로고침 옆) -->
+        <div id="modeSelector" class="mode-selector">
+          <button class="mode-btn active" data-mode="webrtc-hls" onclick="switchMode(this)">Auto</button>
+          <button class="mode-btn" data-mode="webrtc" onclick="switchMode(this)">WebRTC</button>
+          <button class="mode-btn" data-mode="hls" onclick="switchMode(this)">HLS</button>
+        </div>
+      </div>
     </main>
 
     <script src="/js/embed.js"></script>
-</body>
+  </body>
 </html>
