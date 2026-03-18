@@ -1,0 +1,4 @@
+# local 프로파일: STUN/TURN 없는 go2rtc 설정 → WebRTC 즉시 연결
+app:
+  go2rtc:
+    config: ./go2rtc-local.yml

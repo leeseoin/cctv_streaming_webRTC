@@ -39,8 +39,6 @@ out/
 ### go2rtc ###
 go2rtc
 recording/
-go2rtc.yaml
-
 
 ### docs directory ###
 docs
@@ -48,3 +46,6 @@ docs
 ### CLUADE ###
 .claude
 CLAUDE.md
+
+### .env ###
+.env

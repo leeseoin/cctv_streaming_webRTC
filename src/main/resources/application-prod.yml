@@ -1,0 +1,4 @@
+# prod 프로파일: STUN/TURN 포함된 go2rtc 설정
+app:
+  go2rtc:
+    config: ./go2rtc.yml
