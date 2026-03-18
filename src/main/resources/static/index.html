@@ -4,14 +4,54 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CCTV Streamer</title>
-    <link rel="stylesheet" href="/css/index.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        h1 { margin-bottom: 20px; color: #e94560; }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+        select, button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        select { background: #16213e; color: #eee; }
+        button { background: #e94560; color: #fff; }
+        button:hover { background: #c73e54; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        #status {
+            margin-bottom: 10px;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .connected { background: #2d6a4f; }
+        .disconnected { background: #6a2d2d; }
+        .connecting { background: #6a5a2d; }
+        video {
+            width: 100%;
+            max-width: 960px;
+            background: #000;
+            border-radius: 8px;
+        }
+    </style>
 </head>
 <body>
     <h1>CCTV Streamer</h1>
-    <div style="margin-bottom: 15px; font-size: 13px;">
-        <a href="/dashboard.html" style="color: #e94560;">40CH Dashboard →</a> |
-        <a href="/monitor.html" style="color: #e94560;">System Monitor →</a>
-    </div>
 
     <div class="controls">
         <select id="cameraSelect">
@@ -21,57 +61,95 @@
         <button id="connectBtn" onclick="connect()">연결</button>
         <button id="disconnectBtn" onclick="disconnect()" disabled>해제</button>
     </div>
-    <div class="controls" style="font-size: 13px;">
-        <label><input type="radio" name="streamMode" value="webrtc" checked> WebRTC (저지연)</label>
-        <label><input type="radio" name="streamMode" value="hls"> HLS (HTTP, 안정적)</label>
-        <label><input type="radio" name="streamMode" value="webrtc-hls"> WebRTC + HLS Failover</label>
-    </div>
-    <div class="controls" style="font-size: 13px;" id="iceModePanel">
-        <label><input type="radio" name="iceMode" value="p2p" checked> P2P (직접 연결)</label>
-        <label><input type="radio" name="iceMode" value="turn"> TURN (중계 경유)</label>
-        <label><input type="radio" name="iceMode" value="relay"> TURN 강제 (P2P 차단)</label>
-        <label><input type="radio" name="iceMode" value="test" style="margin-left:10px"> 공개TURN 테스트</label>
-    </div>
 
     <div id="status" class="disconnected">연결 안 됨</div>
 
     <video id="video" autoplay muted playsinline></video>
 
-    <div class="stats-panel" id="statsPanel">
-        <h3 id="statsTitle">연결 통계 (1초마다 갱신)</h3>
-        <div class="stats-grid">
-            <div class="stat-item">
-                <div class="stat-label">지연시간 (RTT)</div>
-                <div><span class="stat-value" id="stat-rtt">-</span> <span class="stat-unit">ms</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Jitter (떨림)</div>
-                <div><span class="stat-value" id="stat-jitter">-</span> <span class="stat-unit">ms</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">프레임률</div>
-                <div><span class="stat-value" id="stat-fps">-</span> <span class="stat-unit">fps</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">비트레이트</div>
-                <div><span class="stat-value" id="stat-bitrate">-</span> <span class="stat-unit">kbps</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">해상도</div>
-                <div><span class="stat-value" id="stat-resolution">-</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">패킷 손실</div>
-                <div><span class="stat-value" id="stat-packetloss">-</span> <span class="stat-unit">%</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">드롭 프레임</div>
-                <div><span class="stat-value" id="stat-dropped">-</span> <span class="stat-unit">frames</span></div>
-            </div>
-        </div>
-        <div class="connection-type" id="stat-connection">연결 방식: -</div>
-    </div>
+    <script>
+        let pc = null;
+        const video = document.getElementById('video');
+        const status = document.getElementById('status');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
 
-    <script src="/js/index.js"></script>
+        async function connect() {
+            const cameraId = document.getElementById('cameraSelect').value;
+
+            setStatus('연결 중...', 'connecting');
+            connectBtn.disabled = true;
+
+            try {
+                pc = new RTCPeerConnection();
+
+                pc.ontrack = (event) => {
+                    video.srcObject = event.streams[0];
+                    setStatus('연결됨 - ' + cameraId, 'connected');
+                    disconnectBtn.disabled = false;
+                };
+
+                pc.oniceconnectionstatechange = () => {
+                    if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+                        setStatus('연결 끊김', 'disconnected');
+                        disconnect();
+                    }
+                };
+
+                pc.addTransceiver('video', { direction: 'recvonly' });
+                pc.addTransceiver('audio', { direction: 'recvonly' });
+
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                // ICE gathering 완료 대기
+                if (pc.iceGatheringState !== 'complete') {
+                    await new Promise(resolve => {
+                        pc.onicegatheringstatechange = () => {
+                            if (pc.iceGatheringState === 'complete') resolve();
+                        };
+                    });
+                }
+
+                // Java 서버에 SDP offer 전송
+                const response = await fetch(`/api/cameras/${cameraId}/webrtc`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: pc.localDescription.type,
+                        sdp: pc.localDescription.sdp
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('서버 응답 오류: ' + response.status);
+                }
+
+                const answer = await response.json();
+                await pc.setRemoteDescription(answer);
+
+            } catch (e) {
+                console.error('연결 실패:', e);
+                setStatus('연결 실패: ' + e.message, 'disconnected');
+                connectBtn.disabled = false;
+                disconnect();
+            }
+        }
+
+        function disconnect() {
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            video.srcObject = null;
+            setStatus('연결 안 됨', 'disconnected');
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+        }
+
+        function setStatus(text, className) {
+            status.textContent = text;
+            status.className = className;
+        }
+    </script>
 </body>
 </html>
