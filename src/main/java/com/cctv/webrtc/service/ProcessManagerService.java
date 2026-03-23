@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -17,8 +18,16 @@ import java.util.Map;
 /**
  * go2rtc 프로세스 관리자
  * Spring Boot가 시작되면 go2rtc 바이너리를 자동 실행하고, 죽으면 재시작해주는 애
+ *
+ * - local 프로파일: go2rtc를 Java가 직접 실행/관리 (개발용, 맥북에서 단독 실행)
+ * - docker 프로파일: go2rtc가 Docker 컨테이너로 별도 실행되므로 이 서비스 비활성화
+ *
+ * 사용법:
+ *   로컬 실행 (기본):  ./gradlew bootRun                                    → go2rtc 자동 실행
+ *   Docker 연동:      ./gradlew bootRun --args='--spring.profiles.active=docker'  → go2rtc 안 띄움
  */
 @Service
+@Profile("!docker")  // docker 프로파일이 아닐 때만 활성화
 public class ProcessManagerService {
 
 	private static final Logger log = LoggerFactory.getLogger(ProcessManagerService.class);

@@ -3,6 +3,7 @@ let currentMode = null;     // 'webrtc' 또는 'hls'
 let statsInterval = null;
 let prevBytesReceived = 0;
 let prevTimestamp = 0;
+let hlsInstance = null;     // hls.js 인스턴스
 const video = document.getElementById('video');
 const status = document.getElementById('status');
 const connectBtn = document.getElementById('connectBtn');
@@ -189,6 +190,10 @@ function disconnect() {
         pc.close();
         pc = null;
     }
+    if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+    }
     video.srcObject = null;
     video.removeAttribute('src');
     video.load();
@@ -205,31 +210,52 @@ function setStatus(text, className) {
 }
 
 /**
- * HLS Failover: WebRTC 실패 시 go2rtc MP4 스트림으로 전환
- * go2rtc의 MP4 출력을 Java 프록시(/go2rtc/api/stream.mp4)를 통해 재생
+ * HLS Failover: WebRTC 실패 시 go2rtc HLS 스트림으로 전환
+ * go2rtc의 HLS 출력(/api/stream.m3u8)을 hls.js로 재생
  */
 function fallbackToHls(cameraId) {
-    setStatus('HTTP 스트림 전환 중...', 'connecting');
+    setStatus('HLS 스트림 전환 중...', 'connecting');
 
     // 이전 재생 상태 정리
     video.pause();
     video.srcObject = null;
+    if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
 
-    const mp4Url = `/go2rtc/api/stream.mp4?src=${cameraId}`;
-    video.src = mp4Url;
+    const hlsUrl = `/api/stream.m3u8?src=${cameraId}`;
 
-    video.addEventListener('loadeddata', () => {
-        video.play().catch(() => {});
-        currentMode = 'hls';
-        setStatus('연결됨 - ' + cameraId + ' <span class="hls-badge">HTTP Stream</span>', 'connected');
-        disconnectBtn.disabled = false;
-        startStats(); // HTTP 스트림 통계도 수집
-    }, { once: true });
-
-    video.addEventListener('error', () => {
-        setStatus('HTTP 스트림 연결 실패', 'disconnected');
-        connectBtn.disabled = false;
-    }, { once: true });
+    if (Hls.isSupported()) {
+        hlsInstance = new Hls();
+        hlsInstance.loadSource(hlsUrl);
+        hlsInstance.attachMedia(video);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.play().catch(() => {});
+            currentMode = 'hls';
+            setStatus('연결됨 - ' + cameraId + ' <span class="hls-badge">HLS</span>', 'connected');
+            disconnectBtn.disabled = false;
+            startStats();
+        });
+        hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) {
+                console.error('[HLS] 치명적 오류:', data);
+                setStatus('HLS 스트림 연결 실패', 'disconnected');
+                connectBtn.disabled = false;
+            }
+        });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari 네이티브 HLS
+        video.src = hlsUrl;
+        video.addEventListener('loadeddata', () => {
+            video.play().catch(() => {});
+            currentMode = 'hls';
+            setStatus('연결됨 - ' + cameraId + ' <span class="hls-badge">HLS</span>', 'connected');
+            disconnectBtn.disabled = false;
+            startStats();
+        }, { once: true });
+        video.addEventListener('error', () => {
+            setStatus('HLS 스트림 연결 실패', 'disconnected');
+            connectBtn.disabled = false;
+        }, { once: true });
+    }
 }
 
 // 통계 수집
@@ -280,7 +306,7 @@ async function collectStats() {
         document.getElementById('stat-jitter').textContent = '-';
         document.getElementById('stat-bitrate').textContent = '-';
         document.getElementById('stat-packetloss').textContent = '-';
-        document.getElementById('stat-connection').textContent = '연결 방식: HTTP Stream (MP4)';
+        document.getElementById('stat-connection').textContent = '연결 방식: HLS';
         return;
     }
 

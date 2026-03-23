@@ -14,6 +14,20 @@
                 <button class="mode-btn active" data-mode="webrtc" onclick="setStreamMode(this)">WebRTC</button>
                 <button class="mode-btn" data-mode="hls" onclick="setStreamMode(this)">HLS</button>
             </div>
+            <div class="channel-select">
+                <label>채널 수:</label>
+                <select id="channelCount" onchange="updateChannelCount()">
+                    <option value="1">1</option>
+                    <option value="5">5</option>
+                    <option value="10">10</option>
+                    <option value="15">15</option>
+                    <option value="20">20</option>
+                    <option value="25">25</option>
+                    <option value="30">30</option>
+                    <option value="35">35</option>
+                    <option value="40" selected>40</option>
+                </select>
+            </div>
             <div class="stats" id="stats">연결: 0/40</div>
             <button onclick="connectAll()">전체 연결</button>
             <button onclick="disconnectAll()">전체 해제</button>
@@ -31,6 +45,7 @@
         <div class="cam-title" id="fullscreen-title"></div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="/js/dashboard.js"></script>
 </body>
 </html>

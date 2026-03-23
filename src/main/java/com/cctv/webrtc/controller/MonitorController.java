@@ -13,14 +13,16 @@ import java.lang.management.MemoryMXBean;
 import java.lang.management.OperatingSystemMXBean;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/monitor")
 public class MonitorController {
 
-	private final ProcessManagerService processManagerService;
+	private final Optional<ProcessManagerService> processManagerService;
 
-	public MonitorController(ProcessManagerService processManagerService) {
+	// Optional: docker 프로파일에서는 ProcessManagerService 빈이 없으므로 Optional로 주입
+	public MonitorController(Optional<ProcessManagerService> processManagerService) {
 		this.processManagerService = processManagerService;
 	}
 
@@ -72,8 +74,16 @@ public class MonitorController {
 
 	private Map<String, Object> getGo2RtcStats() {
 		Map<String, Object> stats = new LinkedHashMap<>();
-		long pid = processManagerService.getPid();
-		stats.put("running", processManagerService.isRunning());
+
+		// docker 프로파일: ProcessManagerService 없음 → Docker 컨테이너로 실행 중
+		if (processManagerService.isEmpty()) {
+			stats.put("running", "docker (external)");
+			stats.put("pid", -1);
+			return stats;
+		}
+
+		long pid = processManagerService.get().getPid();
+		stats.put("running", processManagerService.get().isRunning());
 		stats.put("pid", pid);
 
 		if (pid > 0) {

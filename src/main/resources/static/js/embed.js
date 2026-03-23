@@ -14,6 +14,7 @@ const modeBadge = document.getElementById("modeBadge");
 let pc = null;
 let currentMode = null;
 let streamMode = "webrtc-hls";
+let hlsInstance = null;
 
 // ── 초기화 ──
 if (!cameraId) {
@@ -82,7 +83,7 @@ window.onresize = function () {
 function connect() {
   disconnect();
   if (streamMode === "hls") {
-    startMp4(cameraId);
+    startHls(cameraId);
   } else {
     connectWebRTC(cameraId);
   }
@@ -107,7 +108,7 @@ async function connectWebRTC(camId) {
       if (state === "failed") {
         if (pc) { pc.close(); pc = null; }
         if (streamMode === "webrtc-hls") {
-          startMp4(camId);
+          startHls(camId);
         } else {
           setStatus("WebRTC 연결 실패");
         }
@@ -137,36 +138,58 @@ async function connectWebRTC(camId) {
     console.error("[embed] WebRTC 실패:", e);
     if (pc) { pc.close(); pc = null; }
     if (streamMode === "webrtc-hls") {
-      startMp4(camId);
+      startHls(camId);
     } else {
       setStatus("WebRTC 연결 실패: " + e.message);
     }
   }
 }
 
-function startMp4(camId) {
-  setStatus("HTTP Stream 연결 중...");
+function startHls(camId) {
+  setStatus("HLS 연결 중...");
   overlay.classList.remove("hidden");
 
   video.pause();
   video.srcObject = null;
-  video.src = `/go2rtc/api/stream.mp4?src=${camId}`;
+  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
 
-  video.addEventListener("loadeddata", () => {
-    video.play().catch(() => {});
-    currentMode = "hls";
-    overlay.classList.add("hidden");
-    showBadge("hls");
-  }, { once: true });
+  const hlsUrl = `/api/stream.m3u8?src=${camId}`;
 
-  video.addEventListener("error", () => {
-    setStatus("스트림 연결 실패");
-    statusEl.classList.add("error");
-  }, { once: true });
+  if (Hls.isSupported()) {
+    hlsInstance = new Hls();
+    hlsInstance.loadSource(hlsUrl);
+    hlsInstance.attachMedia(video);
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+      video.play().catch(() => {});
+      currentMode = "hls";
+      overlay.classList.add("hidden");
+      showBadge("hls");
+    });
+    hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+      if (data.fatal) {
+        setStatus("HLS 연결 실패");
+        statusEl.classList.add("error");
+      }
+    });
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    // Safari 네이티브 HLS
+    video.src = hlsUrl;
+    video.addEventListener("loadeddata", () => {
+      video.play().catch(() => {});
+      currentMode = "hls";
+      overlay.classList.add("hidden");
+      showBadge("hls");
+    }, { once: true });
+    video.addEventListener("error", () => {
+      setStatus("HLS 연결 실패");
+      statusEl.classList.add("error");
+    }, { once: true });
+  }
 }
 
 function disconnect() {
   if (pc) { pc.close(); pc = null; }
+  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   video.pause();
   video.srcObject = null;
   video.removeAttribute("src");
@@ -183,7 +206,7 @@ function setStatus(text) {
 
 function showBadge(mode) {
   modeBadge.className = "mode-badge " + mode;
-  modeBadge.textContent = mode === "webrtc" ? "WebRTC" : "HTTP Stream";
+  modeBadge.textContent = mode === "webrtc" ? "WebRTC" : "HLS";
 }
 
 // ── 스트리밍 모드 전환 ──
