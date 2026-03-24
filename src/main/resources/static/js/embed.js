@@ -15,6 +15,7 @@ let pc = null;
 let currentMode = null;
 let streamMode = "webrtc-hls";
 let hlsInstance = null;
+let hlsBaseUrl = "/go2rtc/api"; // 기본값, network-check로 갱신
 
 // ── 초기화 ──
 if (!cameraId) {
@@ -80,11 +81,23 @@ window.onresize = function () {
 };
 
 // ── 연결 ──
-function connect() {
+async function connect() {
   disconnect();
-  if (streamMode === "hls") {
+
+  // network-check 1회 호출
+  let isLocal = true;
+  try {
+    const res = await fetch("/api/nms/network-check");
+    const info = await res.json();
+    isLocal = info.local;
+    hlsBaseUrl = info.hlsBaseUrl || "/go2rtc/api";
+  } catch (e) {
+    console.warn("[embed] network-check 실패:", e);
+  }
+
+  if (streamMode === "hls" || (streamMode === "webrtc-hls" && !isLocal)) {
     startHls(cameraId);
-  } else {
+  } else if (streamMode === "webrtc" || (streamMode === "webrtc-hls" && isLocal)) {
     connectWebRTC(cameraId);
   }
 }
@@ -103,18 +116,33 @@ async function connectWebRTC(camId) {
       showBadge("webrtc");
     };
 
+    let iceTimeout = null;
+
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
-      if (state === "failed") {
-        if (pc) { pc.close(); pc = null; }
-        if (streamMode === "webrtc-hls") {
-          startHls(camId);
-        } else {
-          setStatus("WebRTC 연결 실패");
+      if (state === "connected" || state === "completed") {
+        if (iceTimeout) {
+          clearTimeout(iceTimeout);
+          iceTimeout = null;
         }
-      } else if (state === "disconnected") {
-        setStatus("연결 끊김");
-        overlay.classList.remove("hidden");
+      } else if (state === "failed" || state === "disconnected") {
+        // disconnected도 5초 후 fallback (failed로 안 넘어가는 경우 대비)
+        if (iceTimeout) clearTimeout(iceTimeout);
+        iceTimeout = setTimeout(
+          () => {
+            if (pc) {
+              pc.close();
+              pc = null;
+            }
+            if (streamMode === "webrtc-hls") {
+              setStatus("WebRTC 실패 → HLS 전환 중...");
+              startHls(camId);
+            } else {
+              setStatus("WebRTC 연결 실패");
+            }
+          },
+          state === "failed" ? 0 : 5000,
+        );
       }
     };
 
@@ -134,9 +162,26 @@ async function connectWebRTC(camId) {
 
     const answer = await response.json();
     await pc.setRemoteDescription(answer);
+
+    // ICE 연결 10초 타임아웃 (SDP 교환 성공했지만 ICE가 안 되는 경우)
+    iceTimeout = setTimeout(() => {
+      if (pc && pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "completed") {
+        pc.close();
+        pc = null;
+        if (streamMode === "webrtc-hls") {
+          setStatus("WebRTC 타임아웃 → HLS 전환 중...");
+          startHls(camId);
+        } else {
+          setStatus("WebRTC 연결 타임아웃");
+        }
+      }
+    }, 10000);
   } catch (e) {
     console.error("[embed] WebRTC 실패:", e);
-    if (pc) { pc.close(); pc = null; }
+    if (pc) {
+      pc.close();
+      pc = null;
+    }
     if (streamMode === "webrtc-hls") {
       startHls(camId);
     } else {
@@ -151,45 +196,78 @@ function startHls(camId) {
 
   video.pause();
   video.srcObject = null;
-  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-
-  const hlsUrl = `/api/stream.m3u8?src=${camId}`;
-
-  if (Hls.isSupported()) {
-    hlsInstance = new Hls();
-    hlsInstance.loadSource(hlsUrl);
-    hlsInstance.attachMedia(video);
-    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-      video.play().catch(() => {});
-      currentMode = "hls";
-      overlay.classList.add("hidden");
-      showBadge("hls");
-    });
-    hlsInstance.on(Hls.Events.ERROR, (event, data) => {
-      if (data.fatal) {
-        setStatus("HLS 연결 실패");
-        statusEl.classList.add("error");
-      }
-    });
-  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-    // Safari 네이티브 HLS
-    video.src = hlsUrl;
-    video.addEventListener("loadeddata", () => {
-      video.play().catch(() => {});
-      currentMode = "hls";
-      overlay.classList.add("hidden");
-      showBadge("hls");
-    }, { once: true });
-    video.addEventListener("error", () => {
-      setStatus("HLS 연결 실패");
-      statusEl.classList.add("error");
-    }, { once: true });
+  if (hlsInstance) {
+    hlsInstance.destroy();
+    hlsInstance = null;
   }
+
+  // FFmpeg HLS (4초 segment, 끊김 없음)
+  const hlsUrl = `/hls/${camId}.m3u8`;
+
+  function createHls() {
+    if (hlsInstance) {
+      hlsInstance.destroy();
+      hlsInstance = null;
+    }
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      // Safari/iOS — 네이티브 HLS (가장 안정적)
+      video.src = hlsUrl;
+      video.addEventListener(
+        "loadeddata",
+        () => {
+          video.play().catch(() => {});
+          currentMode = "hls";
+          overlay.classList.add("hidden");
+          showBadge("hls");
+        },
+        { once: true },
+      );
+      video.addEventListener(
+        "error",
+        () => {
+          setTimeout(createHls, 500);
+        },
+        { once: true },
+      );
+    } else if (Hls.isSupported()) {
+      // Chrome/Android — hls.js
+      hlsInstance = new Hls({
+        liveSyncDurationCount: 1,
+        liveMaxLatencyDurationCount: 3,
+        levelLoadingMaxRetry: 10,
+        manifestLoadingMaxRetry: 10,
+        backBufferLength: 0,
+      });
+      hlsInstance.loadSource(hlsUrl);
+      hlsInstance.attachMedia(video);
+      hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(() => {});
+        currentMode = "hls";
+        overlay.classList.add("hidden");
+        showBadge("hls");
+      });
+      hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          hlsInstance.destroy();
+          hlsInstance = null;
+          setTimeout(createHls, 500);
+        }
+      });
+    }
+  }
+
+  createHls();
 }
 
 function disconnect() {
-  if (pc) { pc.close(); pc = null; }
-  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  if (pc) {
+    pc.close();
+    pc = null;
+  }
+  if (hlsInstance) {
+    hlsInstance.destroy();
+    hlsInstance = null;
+  }
   video.pause();
   video.srcObject = null;
   video.removeAttribute("src");

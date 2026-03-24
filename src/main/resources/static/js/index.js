@@ -221,7 +221,7 @@ function fallbackToHls(cameraId) {
     video.srcObject = null;
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
 
-    const hlsUrl = `/api/stream.m3u8?src=${cameraId}`;
+    const hlsUrl = `/go2rtc/api/stream.m3u8?src=${cameraId}`;
 
     if (Hls.isSupported()) {
         hlsInstance = new Hls();

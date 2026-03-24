@@ -78,6 +78,14 @@ async function connectWebRTC(cameraId) {
         setBadge(cameraId, null);
         connectedCount = Math.max(0, connectedCount - 1);
         updateStats();
+
+        // 자동 재연결 (의도적 해제가 아닌 경우)
+        if (peerConnections[cameraId]) {
+          pc.close();
+          delete peerConnections[cameraId];
+          console.warn(`[WebRTC] ${cameraId} 끊김, 3초 후 재연결`);
+          setTimeout(() => connectWebRTC(cameraId), 3000);
+        }
       }
     };
 
@@ -117,11 +125,14 @@ async function connectWebRTC(cameraId) {
 }
 
 // ── HLS 연결 (hls.js 사용) ──
-const hlsRetryCount = {};  // 채널별 자동 재연결 횟수
-const HLS_MAX_RETRY = 5;   // 최대 자동 재연결 횟수
+const hlsRetryCount = {};    // 채널별 연속 재연결 횟수
+const hlsStopped = {};       // 채널별 의도적 중단 플래그
 
 function connectHls(cameraId) {
   return new Promise((resolve) => {
+    // 의도적 중단이면 재연결하지 않음
+    if (hlsStopped[cameraId]) return resolve();
+
     const video = document.getElementById("video-" + cameraId);
     const dot = document.getElementById("dot-" + cameraId);
     dot.className = "status-dot dot-connecting";
@@ -133,7 +144,7 @@ function connectHls(cameraId) {
       delete hlsInstances[cameraId];
     }
 
-    const hlsUrl = `/api/stream.m3u8?src=${cameraId}`;
+    const hlsUrl = `/go2rtc/api/stream.m3u8?src=${cameraId}`;
 
     if (Hls.isSupported()) {
       const hls = new Hls({
@@ -161,23 +172,23 @@ function connectHls(cameraId) {
       });
       hls.on(Hls.Events.ERROR, (event, data) => {
         if (data.fatal) {
-          const retries = hlsRetryCount[cameraId] || 0;
-          if (retries < HLS_MAX_RETRY) {
-            // 세션 만료 → 자동 재연결 (새 세션 ID 발급)
-            hlsRetryCount[cameraId] = retries + 1;
-            console.warn(`[HLS] ${cameraId} 세션 만료, 재연결 ${retries + 1}/${HLS_MAX_RETRY}`);
-            dot.className = "status-dot dot-connecting";
-            hls.destroy();
-            delete hlsInstances[cameraId];
-            setTimeout(() => {
-              connectHls(cameraId).then(resolve);
-            }, 2000);
-          } else {
-            console.error(`[HLS] ${cameraId} 재연결 ${HLS_MAX_RETRY}회 초과, 포기`);
-            dot.className = "status-dot dot-disconnected";
-            setBadge(cameraId, null);
-            resolve();
-          }
+          if (hlsStopped[cameraId]) return resolve();
+
+          const retries = (hlsRetryCount[cameraId] || 0) + 1;
+          hlsRetryCount[cameraId] = retries;
+
+          // 지수 백오프 + 랜덤 지터 (동시 재연결 방지)
+          const baseDelay = Math.min(2000 * Math.pow(2, retries - 1), 30000);
+          const jitter = Math.random() * 3000;  // 0~3초 랜덤
+          const delay = baseDelay + jitter;
+          console.warn(`[HLS] ${cameraId} 세션 만료, 재연결 #${retries} (${(delay/1000).toFixed(1)}초 후)`);
+          dot.className = "status-dot dot-connecting";
+          hls.destroy();
+          delete hlsInstances[cameraId];
+
+          setTimeout(() => {
+            connectHls(cameraId).then(resolve);
+          }, delay);
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -202,6 +213,7 @@ function connectHls(cameraId) {
 }
 
 function disconnectCamera(cameraId) {
+  hlsStopped[cameraId] = true;  // 재연결 루프 중단
   if (peerConnections[cameraId]) {
     peerConnections[cameraId].close();
     delete peerConnections[cameraId];
@@ -242,6 +254,10 @@ function setBadge(cameraId, mode) {
 }
 
 async function connectAll() {
+  // 이전 중단 플래그 초기화
+  for (const key in hlsStopped) delete hlsStopped[key];
+  for (const key in hlsRetryCount) delete hlsRetryCount[key];
+
   console.log(`[Stress Test] ${streamMode} 모드, ${activeChannels}채널 연결 시작`);
   const t0 = performance.now();
 
@@ -249,6 +265,8 @@ async function connectAll() {
     for (let i = 1; i <= activeChannels; i++) {
       const id = "emu" + String(i).padStart(2, "0");
       await connectHls(id);
+      // 채널 간 200ms 딜레이 — go2rtc 세션 생성 분산
+      await new Promise((r) => setTimeout(r, 200));
     }
   } else {
     for (let i = 1; i <= activeChannels; i++) {
@@ -266,11 +284,11 @@ function disconnectAll() {
   connectedCount = 0;
   for (let i = 1; i <= MAX_CHANNELS; i++) {
     const id = "emu" + String(i).padStart(2, "0");
-    hlsRetryCount[id] = HLS_MAX_RETRY;  // 재연결 방지 (의도적 해제)
     disconnectCamera(id);
   }
   // 카운터 초기화 (다음 연결을 위해)
   for (const key in hlsRetryCount) delete hlsRetryCount[key];
+  for (const key in hlsStopped) delete hlsStopped[key];
   updateStats();
 }
 
@@ -329,7 +347,7 @@ function openFullscreen(cameraId) {
     fsVideo.srcObject = video.srcObject;
   } else if (hlsInstances[cameraId]) {
     // HLS: 새 hls.js 인스턴스로 풀스크린 비디오에 연결
-    const hlsUrl = `/api/stream.m3u8?src=${cameraId}`;
+    const hlsUrl = `/go2rtc/api/stream.m3u8?src=${cameraId}`;
     fullscreenHls = new Hls({
       maxBufferLength: 10,
       maxMaxBufferLength: 30,
