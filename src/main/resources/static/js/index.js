@@ -32,47 +32,9 @@ async function connect() {
     }
 
     try {
-        // ICE 모드에 따라 설정 결정
-        const iceMode = document.querySelector('input[name="iceMode"]:checked').value;
         const rtcConfig = {};
 
-        if (iceMode === 'turn') {
-            rtcConfig.iceServers = [
-                { urls: 'stun:192.168.0.83:3478' },
-                {
-                    urls: 'turn:192.168.0.83:3478',
-                    username: 'cctv',
-                    credential: 'cctv1234'
-                }
-            ];
-        }
-        // relay 모드: TURN만 사용 (STUN 불필요, P2P 차단)
-        if (iceMode === 'relay') {
-            rtcConfig.iceServers = [
-                {
-                    urls: [
-                        'turn:192.168.0.83:3478?transport=udp',
-                        'turn:192.168.0.83:3478?transport=tcp'
-                    ],
-                    username: 'cctv',
-                    credential: 'cctv1234'
-                }
-            ];
-            rtcConfig.iceTransportPolicy = 'relay';
-        }
-        // 공개 TURN 테스트용 (coturn 문제 분리용)
-        if (iceMode === 'test') {
-            rtcConfig.iceServers = [
-                {
-                    urls: 'turn:standard.relay.metered.ca:443?transport=tcp',
-                    username: 'b093c0673684ba88af1de99b',
-                    credential: '2X3OoXjOqLgjRGWY'
-                }
-            ];
-            rtcConfig.iceTransportPolicy = 'relay';
-        }
-
-        console.log('ICE 모드:', iceMode, 'RTCConfig:', JSON.stringify(rtcConfig));
+        console.log('RTCConfig:', JSON.stringify(rtcConfig));
 
         pc = new RTCPeerConnection(rtcConfig);
 
@@ -88,7 +50,7 @@ async function connect() {
                 currentMode = 'webrtc';
                 setStatus('연결됨 - ' + cameraId + ' <span class="webrtc-badge">WebRTC</span>', 'connected');
             } else if (state === 'checking') {
-                setStatus('ICE 연결 확인 중... (' + iceMode + ')', 'connecting');
+                setStatus('ICE 연결 확인 중...', 'connecting');
             } else if (state === 'failed') {
                 if (pc) { pc.close(); pc = null; }
                 // WebRTC + HLS Failover 모드일 때만 자동 전환
@@ -153,7 +115,7 @@ async function connect() {
 
         // Java 서버에 SDP offer 전송
         console.log('[4] SDP offer 전송 시작');
-        const response = await fetch(`/api/cameras/${cameraId}/webrtc`, {
+        const response = await fetch(`${CONFIG.API_BASE}/api/cameras/${cameraId}/webrtc`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -221,7 +183,7 @@ function fallbackToHls(cameraId) {
     video.srcObject = null;
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
 
-    const hlsUrl = `/go2rtc/api/stream.m3u8?src=${cameraId}`;
+    const hlsUrl = `${CONFIG.GO2RTC_BASE}/api/stream.m3u8?src=${cameraId}`;
 
     if (Hls.isSupported()) {
         hlsInstance = new Hls();

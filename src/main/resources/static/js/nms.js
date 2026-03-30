@@ -27,7 +27,7 @@ async function fetchCurrentTab() {
 
 // --- nms1: Daily Summary ---
 async function fetchDaily() {
-    const res = await fetch('/api/nms/daily');
+    const res = await fetch(`${CONFIG.API_BASE}/api/nms/daily`);
     const data = await res.json();
 
     const kpi = data.kpi || {};
@@ -59,7 +59,7 @@ async function fetchDaily() {
 
 // --- nms2: Real-time ---
 async function fetchRealtime() {
-    const res = await fetch('/api/nms/realtime');
+    const res = await fetch(`${CONFIG.API_BASE}/api/nms/realtime`);
     const data = await res.json();
 
     setText('r-cpu', fmtPct(data.cpuPercent));
@@ -76,7 +76,7 @@ async function fetchRealtime() {
 
 // --- nms3: IP Distribution ---
 async function fetchIpDistribution() {
-    const res = await fetch('/api/nms/ip-distribution');
+    const res = await fetch(`${CONFIG.API_BASE}/api/nms/ip-distribution`);
     const json = await res.json();
     const data = json.distribution || [];
     const list = document.getElementById('ipBarList');

@@ -1,6 +1,6 @@
 async function fetchStats() {
     try {
-        const res = await fetch('/api/monitor');
+        const res = await fetch(`${CONFIG.API_BASE}/api/monitor`);
         const data = await res.json();
 
         // JVM

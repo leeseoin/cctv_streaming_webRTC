@@ -27,7 +27,7 @@ import java.util.Map;
  *   Docker 연동:      ./gradlew bootRun --args='--spring.profiles.active=docker'  → go2rtc 안 띄움
  */
 @Service
-@Profile("!docker")  // docker 프로파일이 아닐 때만 활성화
+@Profile("local")  // local 프로파일에서만 활성화 (go2rtc 바이너리 직접 실행)
 public class ProcessManagerService {
 
 	private static final Logger log = LoggerFactory.getLogger(ProcessManagerService.class);

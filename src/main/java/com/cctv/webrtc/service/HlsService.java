@@ -20,6 +20,7 @@ import java.nio.file.Path;
  * FFmpeg이 그걸 받아서 4초 segment의 정상적인 HLS로 변환.
  */
 @Service
+@org.springframework.context.annotation.Profile("ffmpeg-hls") // FFmpeg HLS 필요할 때만 활성화
 public class HlsService {
 
 	private static final Logger log = LoggerFactory.getLogger(HlsService.class);

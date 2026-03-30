@@ -32,9 +32,9 @@ public class PtzService {
 
 	public PtzService(AppProperties properties) {
 		var cam = properties.camera();
-		this.baseUrl = "http://" + cam.ip() + ":" + cam.isapiPort();
-		this.username = cam.isapiUser();
-		this.password = cam.isapiPass();
+		this.baseUrl = "http://" + cam.ip().trim() + ":" + cam.isapiPort();
+		this.username = cam.isapiUser().trim();
+		this.password = cam.isapiPass().trim();
 		this.httpClient = HttpClient.newHttpClient();
 	}
 

@@ -97,7 +97,7 @@ async function connectWebRTC(cameraId) {
     await pc.setLocalDescription(offer);
     const t3 = performance.now();
 
-    const response = await fetch(`/api/cameras/${cameraId}/webrtc`, {
+    const response = await fetch(`${CONFIG.API_BASE}/api/cameras/${cameraId}/webrtc`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -144,7 +144,7 @@ function connectHls(cameraId) {
       delete hlsInstances[cameraId];
     }
 
-    const hlsUrl = `/go2rtc/api/stream.m3u8?src=${cameraId}`;
+    const hlsUrl = `${CONFIG.GO2RTC_BASE}/api/stream.m3u8?src=${cameraId}`;
 
     if (Hls.isSupported()) {
       const hls = new Hls({
@@ -347,7 +347,7 @@ function openFullscreen(cameraId) {
     fsVideo.srcObject = video.srcObject;
   } else if (hlsInstances[cameraId]) {
     // HLS: 새 hls.js 인스턴스로 풀스크린 비디오에 연결
-    const hlsUrl = `/go2rtc/api/stream.m3u8?src=${cameraId}`;
+    const hlsUrl = `${CONFIG.GO2RTC_BASE}/api/stream.m3u8?src=${cameraId}`;
     fullscreenHls = new Hls({
       maxBufferLength: 10,
       maxMaxBufferLength: 30,

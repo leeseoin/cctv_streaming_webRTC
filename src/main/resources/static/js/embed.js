@@ -15,7 +15,8 @@ let pc = null;
 let currentMode = null;
 let streamMode = "webrtc-hls";
 let hlsInstance = null;
-let hlsBaseUrl = "/go2rtc/api"; // 기본값, network-check로 갱신
+let hlsBaseUrl = `${CONFIG.GO2RTC_BASE}/api`;
+const hlsMode = params.get("hls") || "go2rtc"; // "go2rtc" | "ffmpeg"
 
 // ── 초기화 ──
 if (!cameraId) {
@@ -87,10 +88,10 @@ async function connect() {
   // network-check 1회 호출
   let isLocal = true;
   try {
-    const res = await fetch("/api/nms/network-check");
+    const res = await fetch(`${CONFIG.API_BASE}/api/nms/network-check`);
     const info = await res.json();
     isLocal = info.local;
-    hlsBaseUrl = info.hlsBaseUrl || "/go2rtc/api";
+    hlsBaseUrl = `${CONFIG.GO2RTC_BASE}/api`;
   } catch (e) {
     console.warn("[embed] network-check 실패:", e);
   }
@@ -152,7 +153,7 @@ async function connectWebRTC(camId) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    const response = await fetch(`/api/cameras/${camId}/webrtc`, {
+    const response = await fetch(`${CONFIG.API_BASE}/api/cameras/${camId}/webrtc`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: offer.type, sdp: offer.sdp }),
@@ -201,16 +202,62 @@ function startHls(camId) {
     hlsInstance = null;
   }
 
-  // FFmpeg HLS (4초 segment, 끊김 없음)
-  const hlsUrl = `/hls/${camId}.m3u8`;
+  const hlsUrl = hlsMode === "ffmpeg"
+    ? `/hls/${camId}.m3u8`                          // FFmpeg HLS (4초 segment)
+    : `${hlsBaseUrl}/stream.m3u8?src=${camId}`;     // go2rtc HLS (2초 segment)
 
   function createHls() {
     if (hlsInstance) {
       hlsInstance.destroy();
       hlsInstance = null;
     }
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Safari/iOS — 네이티브 HLS (가장 안정적)
+    if (Hls.isSupported()) {
+      // Chrome/Android — hls.js
+      hlsInstance = new Hls({
+        liveSyncDurationCount: 1,        // 라이브 edge에서 1 segment 뒤 (최소)
+        liveMaxLatencyDurationCount: 2,   // 최대 2 segment 뒤 (넘으면 seek)
+        maxBufferLength: 1.5,             // 최대 1.5초 버퍼 (segment 1개분)
+        maxMaxBufferLength: 3,            // 절대 최대 3초
+        levelLoadingMaxRetry: 10,
+        manifestLoadingMaxRetry: 10,
+        backBufferLength: 0,              // 뒤로감기 버퍼 없음
+        lowLatencyMode: true,             // 저지연 모드
+        highBufferWatchdogPeriod: 1,      // 버퍼 감시 주기 1초
+      });
+      hlsInstance.loadSource(hlsUrl);
+      hlsInstance.attachMedia(video);
+
+      // 디버그: 단계별 타이밍 로그
+      const hlsStart = Date.now();
+      hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+        console.log(`[HLS] ⏱ manifest parsed: +${Date.now() - hlsStart}ms`);
+        video.play().catch(() => {});
+        currentMode = "hls";
+        overlay.classList.add("hidden");
+        showBadge("hls");
+      });
+      hlsInstance.on(Hls.Events.LEVEL_LOADED, (_e, data) => {
+        console.log(`[HLS] ⏱ playlist loaded: +${Date.now() - hlsStart}ms, segments: ${data.details.fragments.length}, live: ${data.details.live}`);
+      });
+      hlsInstance.on(Hls.Events.FRAG_LOADED, (_e, data) => {
+        console.log(`[HLS] ⏱ segment ${data.frag.sn} loaded: +${Date.now() - hlsStart}ms, size: ${(data.frag.stats.total/1024).toFixed(1)}KB`);
+      });
+      hlsInstance.on(Hls.Events.FRAG_BUFFERED, (_e, data) => {
+        const buffered = video.buffered;
+        const bufferEnd = buffered.length > 0 ? buffered.end(buffered.length - 1) : 0;
+        const bufferLen = bufferEnd - video.currentTime;
+        console.log(`[HLS] ⏱ segment ${data.frag.sn} buffered: +${Date.now() - hlsStart}ms, buffer: ${bufferLen.toFixed(1)}s`);
+      });
+      hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
+        console.warn(`[HLS] error: ${data.type} ${data.details} fatal: ${data.fatal}`);
+        if (data.fatal) {
+          hlsInstance.destroy();
+          hlsInstance = null;
+          setTimeout(createHls, 500);
+        }
+      });
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      // hls.js 미지원 브라우저 — 네이티브 HLS fallback
       video.src = hlsUrl;
       video.addEventListener(
         "loadeddata",
@@ -229,30 +276,6 @@ function startHls(camId) {
         },
         { once: true },
       );
-    } else if (Hls.isSupported()) {
-      // Chrome/Android — hls.js
-      hlsInstance = new Hls({
-        liveSyncDurationCount: 1,
-        liveMaxLatencyDurationCount: 3,
-        levelLoadingMaxRetry: 10,
-        manifestLoadingMaxRetry: 10,
-        backBufferLength: 0,
-      });
-      hlsInstance.loadSource(hlsUrl);
-      hlsInstance.attachMedia(video);
-      hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {});
-        currentMode = "hls";
-        overlay.classList.add("hidden");
-        showBadge("hls");
-      });
-      hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          hlsInstance.destroy();
-          hlsInstance = null;
-          setTimeout(createHls, 500);
-        }
-      });
     }
   }
 
@@ -297,7 +320,7 @@ function switchMode(btn) {
 
 // ── PTZ 제어 ──
 function ptzCtrl(pan, tilt, zoom) {
-  fetch(`/api/ptz/${cameraId}/move`, {
+  fetch(`${CONFIG.API_BASE}/api/ptz/${cameraId}/move`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pan, tilt, zoom }),
