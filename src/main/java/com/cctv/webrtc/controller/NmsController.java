@@ -1,6 +1,4 @@
 package com.cctv.webrtc.controller;
-
-import com.cctv.webrtc.service.NmsService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,28 +19,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/nms")
-public class NmsController {
-
-	private final NmsService nmsService;
-
-	public NmsController(NmsService nmsService) {
-		this.nmsService = nmsService;
-	}
-
-	@GetMapping("/daily")
-	public ResponseEntity<Map<String, Object>> daily() {
-		return ResponseEntity.ok(nmsService.getDailySummary());
-	}
-
-	@GetMapping("/realtime")
-	public ResponseEntity<Map<String, Object>> realtime() {
-		return ResponseEntity.ok(nmsService.getRealtime());
-	}
-
-	@GetMapping("/ip-distribution")
-	public ResponseEntity<Map<String, Object>> ipDistribution() {
-		return ResponseEntity.ok(nmsService.getIpDistribution());
-	}
+public class NmsController {	
 
 	/**
 	 * 클라이언트 IP가 LAN(사설 IP)인지 판별.
