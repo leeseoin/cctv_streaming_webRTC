@@ -3,7 +3,10 @@ let activeChannels = 40;  // 현재 연결할 채널 수
 const peerConnections = {};
 const hlsInstances = {};   // hls.js 인스턴스 관리
 let connectedCount = 0;
-let streamMode = "webrtc"; // 'webrtc' | 'hls'
+const _params = new URLSearchParams(location.search);
+let streamMode = _params.get("mode") || "auto"; // 'auto' | 'webrtc' | 'hls'
+const MAX_WEBRTC_RETRIES = 3;
+const webrtcRetryCounts = {}; // 채널별 WebRTC 재시도 카운터
 
 // 그리드 생성 (40개 전부 만들어두고, 채널 수에 따라 표시/숨김)
 const grid = document.getElementById("grid");
@@ -157,6 +160,9 @@ function connectHls(cameraId) {
         levelLoadingRetryDelay: 1000,
         fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 1000,
+        xhrSetup: (xhr) => {
+          xhr.setRequestHeader("ngrok-skip-browser-warning", "true");
+        },
       });
       hlsInstances[cameraId] = hls;
       hls.loadSource(hlsUrl);
@@ -351,6 +357,9 @@ function openFullscreen(cameraId) {
     fullscreenHls = new Hls({
       maxBufferLength: 10,
       maxMaxBufferLength: 30,
+      xhrSetup: (xhr) => {
+        xhr.setRequestHeader("ngrok-skip-browser-warning", "true");
+      },
     });
     fullscreenHls.loadSource(hlsUrl);
     fullscreenHls.attachMedia(fsVideo);
@@ -376,4 +385,9 @@ function closeFullscreen() {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeFullscreen();
+});
+
+// URL 파라미터 모드 반영 (버튼 active 상태)
+document.querySelectorAll(".mode-btn").forEach((b) => {
+  b.classList.toggle("active", b.dataset.mode === streamMode);
 });

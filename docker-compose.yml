@@ -4,16 +4,15 @@
 #
 # [스트리밍]  go2rtc, frontend, mediamtx
 # [모니터링]  go2rtc-exporter → prometheus ← node-exporter
-#             metrics-exporter → metrics.yml → metrics-nginx
+# [대시보드]  AWS Grafana → autossh 터널 → prometheus:9090
 # ═══════════════════════════════════════════════════════════
 
 services:
-
   # ─────────────────────────────────────
   # 스트리밍
   # ─────────────────────────────────────
 
-  # go2rtc: 미디어 서버 (RTSP → WebRTC/HLS 변환)
+  # go2rtc: 미디어 서버 (RTSP → WebRTC/HLS remux)
   go2rtc:
     build:
       context: .
@@ -26,10 +25,10 @@ services:
       - ./docker/go2rtc/go2rtc.yml:/config/go2rtc.yaml
       - ./docker/go2rtc/certs:/certs:ro
     ports:
-      - "1984:1984"   # API HTTP (Spring Boot에서 접근)
-      - "8443:443"    # API HTTPS (go2rtc 자체 SSL, HTTP/2)
-      - "8555:8555"   # WebRTC UDP
-      - "8554:8554"   # RTSP 리스트림
+      - "1984:1984" # API HTTP (Spring Boot에서 접근)
+      - "8443:443" # API HTTPS (go2rtc 자체 SSL, HTTP/2)
+      - "8555:8555" # WebRTC UDP
+      - "8554:8554" # RTSP 리스트림
     depends_on:
       - mediamtx
 
@@ -41,7 +40,7 @@ services:
     container_name: frontend
     restart: unless-stopped
     ports:
-      - "3000:80"    # 프론트엔드 웹 UI
+      - "3000:80" # 프론트엔드 웹 UI
 
   # mediamtx: CCTV 에뮬레이터용 RTSP 서버
   mediamtx:
@@ -51,7 +50,7 @@ services:
     volumes:
       - ./docker/mediamtx/mediamtx.yml:/mediamtx.yml
     ports:
-      - "8553:8553"   # RTSP (에뮬레이터 영상 수신)
+      - "8553:8553" # RTSP (에뮬레이터 영상 수신)
 
   # ─────────────────────────────────────
   # 모니터링: 수집
@@ -66,7 +65,7 @@ services:
     container_name: go2rtc-exporter
     restart: unless-stopped
     ports:
-      - "1985:1985"   # Prometheus 스크랩 엔드포인트
+      - "1985:1985" # Prometheus 스크랩 엔드포인트
     depends_on:
       - go2rtc
 
@@ -81,11 +80,11 @@ services:
       - /sys:/host/sys:ro
       - /:/rootfs:ro
     command:
-      - '--path.procfs=/host/proc'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
     ports:
-      - "9100:9100"   # Prometheus 스크랩 엔드포인트
+      - "9100:9100" # Prometheus 스크랩 엔드포인트
 
   # ─────────────────────────────────────
   # 모니터링: 저장
@@ -101,39 +100,10 @@ services:
       - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     ports:
-      - "9090:9090"   # Prometheus Web UI + API
+      - "9090:9090" # Prometheus Web UI + API
     depends_on:
       - go2rtc-exporter
       - node-exporter
 
-  # ─────────────────────────────────────
-  # 모니터링: YAML 내보내기 (→ AWS Grafana)
-  # ─────────────────────────────────────
-
-  # metrics-exporter: Prometheus 쿼리 → metrics.yml 생성 (5초 주기)
-  metrics-exporter:
-    build:
-      context: ./docker/metrics-exporter
-      dockerfile: Dockerfile
-    container_name: metrics-exporter
-    restart: unless-stopped
-    volumes:
-      - metrics_data:/data
-    depends_on:
-      - prometheus
-
-  # metrics-nginx: metrics.yml을 HTTP로 서빙
-  # - AWS Grafana(Infinity 플러그인)에서 이 URL로 YAML 읽기
-  metrics-nginx:
-    image: nginx:alpine
-    container_name: metrics-nginx
-    restart: unless-stopped
-    volumes:
-      - metrics_data:/usr/share/nginx/html:ro
-      - ./docker/metrics-exporter/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    ports:
-      - "9200:80"     # http://localhost:9200/metrics.yml
-
 volumes:
-  prometheus_data:     # Prometheus 시계열 데이터
-  metrics_data:        # metrics.yml 공유 볼륨 (exporter ↔ nginx)
+  prometheus_data: # Prometheus 시계열 데이터
