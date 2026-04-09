@@ -160,9 +160,6 @@ function connectHls(cameraId) {
         levelLoadingRetryDelay: 1000,
         fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 1000,
-        xhrSetup: (xhr) => {
-          xhr.setRequestHeader("ngrok-skip-browser-warning", "true");
-        },
       });
       hlsInstances[cameraId] = hls;
       hls.loadSource(hlsUrl);

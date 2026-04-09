@@ -21,8 +21,8 @@ let hlsInstance = null;
 const hlsMode = params.get("hls") || "go2rtc"; // "go2rtc" | "ffmpeg"
 const streamMode = params.get("mode") || "auto"; // "auto" | "webrtc" | "hls"
 
-// WebRTC 연결 3번 시도
-const MAX_WEBRTC_RETRIES = 3;
+// WebRTC 연결 2번 시도
+const MAX_WEBRTC_RETRIES = 2;
 let webrtcRetryCount = 0;
 let webrtcGeneration = 0;
 
@@ -208,7 +208,7 @@ async function connectWebRTC(camId) {
     const answer = await response.json();
     await pc.setRemoteDescription(answer);
 
-    // ICE 연결 10초 타임아웃
+    // ICE 연결 15초 타임아웃
     iceTimeout = setTimeout(() => {
       if (generation !== webrtcGeneration) return; // stale 체크
       if (pc && pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "completed") {
@@ -217,7 +217,7 @@ async function connectWebRTC(camId) {
         pc = null;
         handleWebRTCFailure(camId);
       }
-    }, 10000);
+    }, 15000);
   } catch (e) {
     console.error(`[WebRTC] 연결 실패 (시도 ${attempt}):`, e);
     if (pc) {
@@ -279,9 +279,6 @@ function startHls(camId) {
         backBufferLength: 0,
         lowLatencyMode: true,
         highBufferWatchdogPeriod: 1,
-        xhrSetup: (xhr) => {
-          xhr.setRequestHeader("ngrok-skip-browser-warning", "true");
-        },
       });
       hlsInstance.loadSource(hlsUrl);
       hlsInstance.attachMedia(video);

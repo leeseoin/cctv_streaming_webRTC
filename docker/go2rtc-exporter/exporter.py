@@ -71,9 +71,17 @@ IP_CACHE_TTL = 86400  # 24시간 캐싱
 _cache_lock = threading.Lock()
 
 
+def is_private_ip(ip):
+    """사설 IP / Docker IP 판별."""
+    if not ip:
+        return True
+    return (ip.startswith("192.168.") or ip.startswith("10.") or
+            ip.startswith("172.") or ip.startswith("127.") or ip == "localhost")
+
+
 def is_mobile_ip(ip):
     """IP가 모바일(통신사 셀룰러)인지 판별. 캐시 히트 시 즉시 반환."""
-    if not ip or ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172."):
+    if not ip or is_private_ip(ip):
         return False
 
     now = time.time()
@@ -319,7 +327,7 @@ def collect():
                     "bytes": bytes_send,
                 }
 
-                if ip:
+                if ip and not is_private_ip(ip):
                     current_ips.add(ip)
                     daily_state["unique_ips"].add(ip)
                     ip_conn_counts[ip] = ip_conn_counts.get(ip, 0) + 1
@@ -374,8 +382,8 @@ def collect():
         cam["sessions"] += 1
         cam["duration"] += duration
 
-        # IP별 집계
-        if session_ip:
+        # IP별 집계 (사설 IP 제외)
+        if session_ip and not is_private_ip(session_ip):
             ip_stat = daily_state["ip_stats"].setdefault(session_ip, {"sessions": 0, "duration": 0.0})
             ip_stat["sessions"] += 1
             ip_stat["duration"] += duration

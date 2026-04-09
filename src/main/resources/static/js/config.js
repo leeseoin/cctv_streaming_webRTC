@@ -6,6 +6,6 @@
  * - GO2RTC_BASE: go2rtc HTTPS (영상 HLS/WebRTC) 서버 주소
  */
 const CONFIG = {
-  API_BASE: "http://115.68.229.44:8085",
-  GO2RTC_BASE: `https://${location.hostname}:8443`,
+  API_BASE: "https://iptest.devsp.kr",
+  GO2RTC_BASE: "https://stream1.devsp.kr:8443",
 };
