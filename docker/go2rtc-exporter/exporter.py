@@ -163,9 +163,10 @@ daily_camera_duration = Gauge("go2rtc_daily_camera_duration_sec", "Total viewing
 daily_camera_peak_readers = Gauge("go2rtc_daily_camera_peak_readers", "Peak concurrent readers per camera today", ["camera"])
 
 # IP TOP 10
-daily_ip_sessions = Gauge("go2rtc_daily_ip_sessions", "Sessions per IP today", ["ip"])
-daily_ip_duration = Gauge("go2rtc_daily_ip_duration_sec", "Total viewing duration per IP today (sec)", ["ip"])
-daily_ip_isp = Gauge("go2rtc_daily_ip_isp", "ISP info per IP (1=has info)", ["ip", "isp", "mobile"])
+_ip_labels = ["ip", "isp", "mobile", "sessions", "duration"]
+daily_ip_sessions = Gauge("go2rtc_daily_ip_sessions", "Sessions per IP today", _ip_labels)
+daily_ip_duration = Gauge("go2rtc_daily_ip_duration_sec", "Total viewing duration per IP today (sec)", _ip_labels)
+daily_ip_isp = Gauge("go2rtc_daily_ip_isp", "ISP info per IP (1=has info)", _ip_labels)
 
 # ════════════════════════════════════════
 # State
@@ -327,7 +328,7 @@ def collect():
                     "bytes": bytes_send,
                 }
 
-                if ip and not is_private_ip(ip):
+                if ip:
                     current_ips.add(ip)
                     daily_state["unique_ips"].add(ip)
                     ip_conn_counts[ip] = ip_conn_counts.get(ip, 0) + 1
@@ -383,7 +384,7 @@ def collect():
         cam["duration"] += duration
 
         # IP별 집계 (사설 IP 제외)
-        if session_ip and not is_private_ip(session_ip):
+        if session_ip:
             ip_stat = daily_state["ip_stats"].setdefault(session_ip, {"sessions": 0, "duration": 0.0})
             ip_stat["sessions"] += 1
             ip_stat["duration"] += duration
@@ -479,14 +480,17 @@ def collect():
     daily_ip_duration._metrics.clear()
     daily_ip_isp._metrics.clear()
     for ip_addr, stats in ip_sorted:
-        daily_ip_sessions.labels(ip=ip_addr).set(stats["sessions"])
-        daily_ip_duration.labels(ip=ip_addr).set(stats["duration"])
-        # ISP 정보 (캐시에 있으면 표시)
         with _cache_lock:
             cached = ip_info_cache.get(ip_addr, {})
-        isp = cached.get("isp", "unknown")
-        mobile = "Y" if cached.get("mobile", False) else "N"
-        daily_ip_isp.labels(ip=ip_addr, isp=isp, mobile=mobile).set(1)
+        isp = cached.get("isp", "")
+        mobile = "Y" if cached.get("mobile", False) else "N" if cached else ""
+        sessions_str = str(stats["sessions"])
+        duration_str = str(int(stats["duration"]))
+
+        common = dict(ip=ip_addr, isp=isp, mobile=mobile, sessions=sessions_str, duration=duration_str)
+        daily_ip_sessions.labels(**common).set(stats["sessions"])
+        daily_ip_duration.labels(**common).set(stats["duration"])
+        daily_ip_isp.labels(**common).set(1)
 
 
 if __name__ == "__main__":

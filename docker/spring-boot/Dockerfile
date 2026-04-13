@@ -5,4 +5,5 @@ COPY build/libs/webrtc-0.0.1-SNAPSHOT.jar app.jar
 
 EXPOSE 8085
 
-ENTRYPOINT ["java", "-Xmx512m", "-jar", "app.jar", "--spring.profiles.active=docker"]
+ENV SPRING_PROFILES_ACTIVE=docker
+ENTRYPOINT ["java", "-Xmx512m", "-jar", "app.jar"]

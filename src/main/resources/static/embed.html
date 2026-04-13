@@ -10,7 +10,7 @@
   <body>
     <!-- 영상 영역 (전체화면) -->
     <header class="viewer">
-      <video id="video" autoplay playsinline muted></video>
+      <video-stream id="video" background muted></video-stream>
     </header>
 
     <!-- 상태 오버레이 -->
@@ -19,7 +19,7 @@
     </div>
 
     <!-- 스트리밍 모드 배지 -->
-    <div id="modeBadge" class="mode-badge"></div>
+    <!-- <div id="modeBadge" class="mode-badge"></div> -->
 
     <!-- 토스트 알림 컨테이너 -->
     <div id="toastContainer" class="toast-container"></div>
@@ -99,8 +99,10 @@
       </div>
     </main>
 
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="/js/config.js"></script>
+    <script type="module">
+      import(`${CONFIG.GO2RTC_BASE}/video-stream.js`);
+    </script>
     <script src="/js/embed.js"></script>
   </body>
 </html>

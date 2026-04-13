@@ -9,6 +9,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import org.springframework.context.annotation.Profile;
+
 import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.Map;
@@ -18,7 +20,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * ONVIF PTZ 제어 (SOAP over HTTP + Digest 인증)
  * - ContinuousMove: 상하좌우 이동 + 줌인/줌아웃
  * - Stop: 정지
+ *
+ * @Profile("onprem") — On-Premise에서만 활성화
  */
+@Profile("onprem")
 @Service
 public class PtzService {
 
