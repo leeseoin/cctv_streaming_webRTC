@@ -1,30 +1,26 @@
 /**
- * embed.js — nexbean 스타일 CCTV 임베딩 플레이어
+ * embed.js — nexbean 스타일 CCTV 임베딩 플레이어 (video-stream 기반)
  *
  * URL 파라미터:
- *   ?cam=cam01           카메라 ID (필수)
+ *   ?cam=cam01            카메라 ID (필수)
  *   ?mode=auto|webrtc|hls 스트리밍 모드 (기본: auto)
- *   ?hls=go2rtc|ffmpeg    HLS 소스 선택 (기본: go2rtc)
  *
- * auto 모드: WebRTC 3회 시도 → 실패 시 HLS fallback + 토스트 알림
+ * video-stream 웹컴포넌트가 WebRTC → MSE → HLS 자동 Failover 처리.
  */
 const params = new URLSearchParams(location.search);
 const cameraId = params.get("cam");
+const streamMode = params.get("mode") || "auto";
 const video = document.getElementById("video");
 const overlay = document.getElementById("overlay");
 const statusEl = document.getElementById("status");
-const modeBadge = document.getElementById("modeBadge");
+const modeBadge = document.getElementById("modeBadge"); // 배지 비활성화됨 (null)
 
-let pc = null;
-let currentMode = null;
-let hlsInstance = null;
-const hlsMode = params.get("hls") || "go2rtc"; // "go2rtc" | "ffmpeg"
-const streamMode = params.get("mode") || "auto"; // "auto" | "webrtc" | "hls"
-
-// WebRTC 연결 2번 시도
-const MAX_WEBRTC_RETRIES = 2;
-let webrtcRetryCount = 0;
-let webrtcGeneration = 0;
+// mode 파라미터 → video-rtc mode 속성 매핑
+const modeMap = {
+  auto: "webrtc,webrtc/tcp,mse,hls",
+  webrtc: "webrtc,webrtc/tcp",
+  hls: "hls",
+};
 
 // ── 초기화 ──
 if (!cameraId) {
@@ -32,12 +28,57 @@ if (!cameraId) {
   statusEl.classList.add("error");
 } else {
   document.title = cameraId + " - CCTV";
-  // 모드 배지 초기 표시
   updateModeIndicator();
-  connect();
+  // video-stream 커스텀 엘리먼트 등록 대기 후 연결
+  customElements.whenDefined("video-stream").then(connect).catch((e) => {
+    console.error("[video-stream] 로드 실패:", e);
+    setStatus("플레이어 로드 실패");
+    statusEl.classList.add("error");
+  });
 }
 
-// ── 모드 인디케이터 (좌상단에 현재 모드 표시) ──
+function connect() {
+  console.log("[embed] connect() 호출됨, video:", video, "pc:", video.pc);
+  setStatus("연결 중...");
+  overlay.classList.remove("hidden");
+
+  // video-stream 속성 설정 → 내부적으로 재연결
+  video.mode = modeMap[streamMode] || modeMap.auto;
+  video.src = new URL(`api/ws?src=${encodeURIComponent(cameraId)}&media=video`, CONFIG.GO2RTC_BASE + "/");
+
+  // 영상 수신 확인
+  const inner = video.video || video.querySelector("video");
+  if (inner) {
+    inner.addEventListener(
+      "loadeddata",
+      () => {
+        overlay.classList.add("hidden");
+        showBadge(video.mode?.split(",")[0] || "webrtc");
+      },
+      { once: true },
+    );
+  }
+
+  // UDP 세션 keepalive: getStats 주기적 호출로 consent check 유도
+  if (window._keepaliveTimer) clearInterval(window._keepaliveTimer);
+  window._keepaliveTimer = setInterval(() => {
+    const pc = video.pc || video._pc;
+    console.log("[keepalive] tick, pc:", pc?.iceConnectionState);
+    if (pc && pc.iceConnectionState === "connected") {
+      pc.getStats().catch(() => {});
+    }
+  }, 3000);
+
+  // video-stream pc state 로그
+  video.addEventListener("pcstate", (e) => {
+    console.log("[video-stream] pc state:", e.detail);
+  });
+
+  // 재연결 주기 단축 (버전에 따라 유효)
+  video.reconnectInterval = 3000;
+}
+
+// ── 모드 인디케이터 ──
 function updateModeIndicator() {
   const indicator = document.getElementById("modeIndicator");
   if (!indicator) return;
@@ -45,25 +86,18 @@ function updateModeIndicator() {
   indicator.textContent = labels[streamMode] || streamMode;
 }
 
-// ── 토스트 알림 ──
-function showToast(message, duration = 4000) {
-  const container = document.getElementById("toastContainer");
-  if (!container) return;
+// ── 상태 표시 ──
+function setStatus(text) {
+  statusEl.textContent = text;
+  statusEl.classList.remove("error");
+  overlay.classList.remove("hidden");
+}
 
-  const toast = document.createElement("div");
-  toast.className = "toast";
-  toast.textContent = message;
-  container.appendChild(toast);
-
-  // 애니메이션 트리거
-  requestAnimationFrame(() => {
-    toast.classList.add("show");
-  });
-
-  setTimeout(() => {
-    toast.classList.remove("show");
-    toast.addEventListener("transitionend", () => toast.remove());
-  }, duration);
+function showBadge(mode) {
+  if (!modeBadge) return;
+  const m = mode.startsWith("webrtc") ? "webrtc" : mode;
+  modeBadge.className = "mode-badge " + m;
+  modeBadge.textContent = m === "webrtc" ? "WebRTC" : m.toUpperCase();
 }
 
 // ── 패널 3단계 제어 (nexbean setbtn 동일) ──
@@ -107,251 +141,15 @@ function setPanel(stage) {
   }
 }
 
-// 초기 상태
 setPanel(0);
 
 window.onresize = function () {
-  if (window.innerWidth < 1280) {
-    setPanel(0);
-  }
+  if (window.innerWidth < 1280) setPanel(0);
 };
-
-// mode=auto일 시, WebRTC 시도, mode=hls이면 바로 HLS 연결
-function connect() {
-  disconnect();
-  webrtcRetryCount = 0;
-
-  if (streamMode === "hls") {
-    startHls(cameraId);
-  } else {
-    // auto 또는 webrtc: WebRTC 시도
-    connectWebRTC(cameraId);
-  }
-}
-
-// WebRTC 연결 시도
-async function connectWebRTC(camId) {
-  webrtcRetryCount++;
-  const attempt = webrtcRetryCount;
-  const generation = ++webrtcGeneration;
-  const isAutoMode = streamMode === "auto";
-
-  if (isAutoMode) {
-    setStatus(`WebRTC 연결 시도 ${attempt}/${MAX_WEBRTC_RETRIES}...`);
-  } else {
-    setStatus("WebRTC 연결 중...");
-  }
-  overlay.classList.remove("hidden");
-
-  // 이전 연결 정리
-  if (pc) {
-    pc.close();
-    pc = null;
-  }
-
-  try {
-    pc = new RTCPeerConnection();
-
-    pc.ontrack = (event) => {
-      video.srcObject = event.streams[0];
-      video.onloadeddata = () => {
-        if (generation !== webrtcGeneration) return; // stale 체크
-        currentMode = "webrtc";
-        overlay.classList.add("hidden");
-        showBadge("webrtc");
-        webrtcRetryCount = 0;
-        console.log(`[WebRTC] 영상 수신 확인 (시도 ${attempt})`);
-        video.onloadeddata = null;
-      };
-    };
-
-    let iceTimeout = null;
-
-    pc.oniceconnectionstatechange = () => {
-      if (generation !== webrtcGeneration) return; // stale 체크
-      const state = pc.iceConnectionState;
-      console.log(`[WebRTC] ICE state: ${state} (시도 ${attempt}/${MAX_WEBRTC_RETRIES})`);
-
-      if (state === "connected" || state === "completed") {
-        if (iceTimeout) {
-          clearTimeout(iceTimeout);
-          iceTimeout = null;
-        }
-      } else if (state === "failed" || state === "disconnected") {
-        if (iceTimeout) clearTimeout(iceTimeout);
-        if (pc) {
-          pc.close();
-          pc = null;
-        }
-        handleWebRTCFailure(camId);
-      }
-    };
-
-    pc.addTransceiver("video", { direction: "recvonly" });
-    pc.addTransceiver("audio", { direction: "recvonly" });
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), 2000);
-    const response = await fetch(`${CONFIG.API_BASE}/api/cameras/${camId}/webrtc`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: offer.type, sdp: offer.sdp }),
-      signal: controller.signal,
-    });
-    clearTimeout(fetchTimeout);
-
-    if (!response.ok) throw new Error("서버 응답 오류: " + response.status);
-
-    const answer = await response.json();
-    await pc.setRemoteDescription(answer);
-
-    // ICE 연결 15초 타임아웃
-    iceTimeout = setTimeout(() => {
-      if (generation !== webrtcGeneration) return; // stale 체크
-      if (pc && pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "completed") {
-        console.log(`[WebRTC] ICE 타임아웃 (시도 ${attempt})`);
-        pc.close();
-        pc = null;
-        handleWebRTCFailure(camId);
-      }
-    }, 15000);
-  } catch (e) {
-    console.error(`[WebRTC] 연결 실패 (시도 ${attempt}):`, e);
-    if (pc) {
-      pc.close();
-      pc = null;
-    }
-    handleWebRTCFailure(camId);
-  }
-}
-
-/**
- * WebRTC 실패 처리
- * - auto 모드: 3회 미만이면 즉시 재시도, 3회 도달하면 HLS fallback + 토스트
- * - webrtc 모드: 그냥 실패 표시
- */
-function handleWebRTCFailure(camId) {
-  if (streamMode === "auto") {
-    if (webrtcRetryCount < MAX_WEBRTC_RETRIES) {
-      console.log(`[Failover] WebRTC 실패 ${webrtcRetryCount}/${MAX_WEBRTC_RETRIES}, 즉시 재시도`);
-      connectWebRTC(camId);
-    } else {
-      console.log(`[Failover] WebRTC ${MAX_WEBRTC_RETRIES}회 실패 → HLS 전환`);
-      showToast("WebRTC 연결 실패, HLS로 전환합니다");
-      startHls(camId);
-    }
-  } else {
-    // webrtc 전용 모드
-    setStatus("WebRTC 연결 실패");
-  }
-}
-
-function startHls(camId) {
-  setStatus("HLS 연결 중...");
-  overlay.classList.remove("hidden");
-
-  video.onloadeddata = null; // WebRTC의 stale 콜백 제거
-  video.pause();
-  video.srcObject = null;
-  if (hlsInstance) {
-    hlsInstance.destroy();
-    hlsInstance = null;
-  }
-
-  const hlsUrl = hlsMode === "ffmpeg" ? `/hls/${camId}.m3u8` : `${CONFIG.GO2RTC_BASE}/api/stream.m3u8?src=${camId}`;
-
-  function createHls() {
-    if (hlsInstance) {
-      hlsInstance.destroy();
-      hlsInstance = null;
-    }
-    if (Hls.isSupported()) {
-      hlsInstance = new Hls({
-        liveSyncDurationCount: 1,
-        liveMaxLatencyDurationCount: 2,
-        maxBufferLength: 1.5,
-        maxMaxBufferLength: 3,
-        levelLoadingMaxRetry: 10,
-        manifestLoadingMaxRetry: 10,
-        backBufferLength: 0,
-        lowLatencyMode: true,
-        highBufferWatchdogPeriod: 1,
-      });
-      hlsInstance.loadSource(hlsUrl);
-      hlsInstance.attachMedia(video);
-
-      hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {});
-        currentMode = "hls";
-        overlay.classList.add("hidden");
-        showBadge("hls");
-      });
-      hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          hlsInstance.destroy();
-          hlsInstance = null;
-          setTimeout(createHls, 500);
-        }
-      });
-    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = hlsUrl;
-      video.addEventListener(
-        "loadeddata",
-        () => {
-          video.play().catch(() => {});
-          currentMode = "hls";
-          overlay.classList.add("hidden");
-          showBadge("hls");
-        },
-        { once: true },
-      );
-      video.addEventListener(
-        "error",
-        () => {
-          setTimeout(createHls, 500);
-        },
-        { once: true },
-      );
-    }
-  }
-
-  createHls();
-}
-
-function disconnect() {
-  if (pc) {
-    pc.close();
-    pc = null;
-  }
-  if (hlsInstance) {
-    hlsInstance.destroy();
-    hlsInstance = null;
-  }
-  video.pause();
-  video.srcObject = null;
-  video.removeAttribute("src");
-  currentMode = null;
-  modeBadge.className = "mode-badge";
-}
-
-// ── 상태 표시 ──
-function setStatus(text) {
-  statusEl.textContent = text;
-  statusEl.classList.remove("error");
-  overlay.classList.remove("hidden");
-}
-
-function showBadge(mode) {
-  modeBadge.className = "mode-badge " + mode;
-  modeBadge.textContent = mode === "webrtc" ? "WebRTC" : "HLS";
-}
 
 // ── PTZ 제어 ──
 function ptzCtrl(pan, tilt, zoom) {
-  fetch(`${CONFIG.API_BASE}/api/ptz/${cameraId}/move`, {
+  fetch(`${CONFIG.GO2RTC_BASE}/api/ptz/${cameraId}/move`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pan, tilt, zoom }),

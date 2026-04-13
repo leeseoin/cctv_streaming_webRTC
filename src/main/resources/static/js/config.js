@@ -7,5 +7,5 @@
  */
 const CONFIG = {
   API_BASE: "https://iptest.devsp.kr",
-  GO2RTC_BASE: "https://stream1.devsp.kr:8443",
+  GO2RTC_BASE: "https://stream1.flexformular.com:8443",
 };
