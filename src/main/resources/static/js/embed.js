@@ -10,15 +10,17 @@
 const params = new URLSearchParams(location.search);
 const cameraId = params.get("cam");
 const streamMode = params.get("mode") || "auto";
-const video = document.getElementById("video");
+let video = null; // video-stream 엘리먼트 (connect에서 동적 생성)
+const viewer = document.getElementById("viewer");
 const overlay = document.getElementById("overlay");
 const statusEl = document.getElementById("status");
 const modeBadge = document.getElementById("modeBadge"); // 배지 비활성화됨 (null)
 
 // mode 파라미터 → video-rtc mode 속성 매핑
 const modeMap = {
-  auto: "webrtc,webrtc/tcp,mse,hls",
-  webrtc: "webrtc,webrtc/tcp",
+  auto: "webrtc,mse,hls",
+  webrtc: "webrtc",
+  mse: "mse",
   hls: "hls",
 };
 
@@ -30,59 +32,100 @@ if (!cameraId) {
   document.title = cameraId + " - CCTV";
   updateModeIndicator();
   // video-stream 커스텀 엘리먼트 등록 대기 후 연결
-  customElements.whenDefined("video-stream").then(connect).catch((e) => {
-    console.error("[video-stream] 로드 실패:", e);
-    setStatus("플레이어 로드 실패");
-    statusEl.classList.add("error");
-  });
+  customElements
+    .whenDefined("video-stream")
+    .then(connect)
+    .catch((e) => {
+      console.error("[video-stream] 로드 실패:", e);
+      setStatus("플레이어 로드 실패");
+      statusEl.classList.add("error");
+    });
 }
 
-function connect() {
-  console.log("[embed] connect() 호출됨, video:", video, "pc:", video.pc);
-  setStatus("연결 중...");
+let fallbackTimer = null;
+
+function createPlayer(mode) {
+  // 기존 엘리먼트 제거
+  if (video) {
+    video.remove();
+    video = null;
+  }
+  if (fallbackTimer) {
+    clearTimeout(fallbackTimer);
+    fallbackTimer = null;
+  }
+
+  console.log(`[embed] createPlayer mode=${mode}`);
+  setStatus(`${mode.toUpperCase()} 연결 중...`);
   overlay.classList.remove("hidden");
 
-  // video-stream 속성 설정 → 내부적으로 재연결
-  video.mode = modeMap[streamMode] || modeMap.auto;
+  // stream.html 패턴: 생성 → 속성 설정 → DOM 삽입
+  video = document.createElement("video-stream");
+  video.id = "video";
+  video.background = true;
+  video.muted = true;
+  video.mode = mode;
   video.src = new URL(`api/ws?src=${encodeURIComponent(cameraId)}&media=video`, CONFIG.GO2RTC_BASE + "/");
+  viewer.appendChild(video);
 
-  // 영상 수신 확인
+  // native controls 비활성화 (클릭 시 pause 방지, 좌측 상단 풀스크린 버튼 사용)
+  const disableControls = () => {
+    const v = video?.video || video?.querySelector?.("video");
+    if (v) {
+      v.controls = false;
+      v.removeAttribute("controls");
+      return true;
+    }
+    return false;
+  };
+  if (!disableControls()) {
+    const tid = setInterval(() => {
+      if (disableControls()) clearInterval(tid);
+    }, 200);
+    setTimeout(() => clearInterval(tid), 5000);
+  }
+
   const inner = video.video || video.querySelector("video");
   if (inner) {
     inner.addEventListener(
       "loadeddata",
       () => {
+        if (fallbackTimer) {
+          clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
         overlay.classList.add("hidden");
-        showBadge(video.mode?.split(",")[0] || "webrtc");
+        showBadge(mode);
+        enableControls(); // loadeddata 시점에 한 번 더 보장
+        console.log(`[embed] 영상 수신 성공 — mode=${mode}`);
       },
       { once: true },
     );
   }
+}
 
-  // UDP 세션 keepalive: getStats 주기적 호출로 consent check 유도
-  if (window._keepaliveTimer) clearInterval(window._keepaliveTimer);
-  window._keepaliveTimer = setInterval(() => {
-    const pc = video.pc || video._pc;
-    console.log("[keepalive] tick, pc:", pc?.iceConnectionState);
-    if (pc && pc.iceConnectionState === "connected") {
-      pc.getStats().catch(() => {});
-    }
-  }, 3000);
-
-  // video-stream pc state 로그
-  video.addEventListener("pcstate", (e) => {
-    console.log("[video-stream] pc state:", e.detail);
-  });
-
-  // 재연결 주기 단축 (버전에 따라 유효)
-  video.reconnectInterval = 3000;
+function connect() {
+  if (streamMode === "auto") {
+    // WebRTC 4초 시도 → 실패 시 MSE 4초 → 실패 시 HLS
+    createPlayer("webrtc");
+    fallbackTimer = setTimeout(() => {
+      console.log("[embed] WebRTC 타임아웃 → MSE fallback");
+      createPlayer("mse");
+      fallbackTimer = setTimeout(() => {
+        console.log("[embed] MSE 타임아웃 → HLS fallback");
+        createPlayer("hls");
+      }, 4000);
+    }, 4000);
+  } else {
+    createPlayer(modeMap[streamMode] || "webrtc");
+  }
 }
 
 // ── 모드 인디케이터 ──
 function updateModeIndicator() {
   const indicator = document.getElementById("modeIndicator");
   if (!indicator) return;
-  const labels = { auto: "Auto (WebRTC→HLS)", webrtc: "WebRTC Only", hls: "HLS Only" };
+  const labels = { auto: "Auto (WebRTC→MSE→HLS)", webrtc: "WebRTC Only", mse: "MSE Only", hls: "HLS Only" };
   indicator.textContent = labels[streamMode] || streamMode;
 }
 

@@ -280,6 +280,25 @@ header.viewer video {
   opacity: 1;
 }
 
+/* ── 풀스크린 버튼 (PTZ 포함 전체화면) ── */
+.btn-fullscreen {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  z-index: 11;
+  cursor: pointer;
+  opacity: 0.7;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-fullscreen:hover {
+  opacity: 1;
+}
+
 /* ── 현재 모드 표시 ── */
 .mode-indicator-wrap {
   position: absolute;
@@ -320,7 +339,9 @@ header.viewer video {
   font-weight: 500;
   opacity: 0;
   transform: translateY(-10px);
-  transition: opacity 0.3s, transform 0.3s;
+  transition:
+    opacity 0.3s,
+    transform 0.3s;
   pointer-events: auto;
 }
 .toast.show {

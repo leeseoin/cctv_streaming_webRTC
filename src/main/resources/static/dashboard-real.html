@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CCTV 대시보드</title>
+    <link rel="stylesheet" href="/css/dashboard-real.css" />
+  </head>
+  <body>
+    <div class="toolbar">
+      <strong style="font-size: 14px">CCTV 대시보드</strong>
+      <span class="spacer"></span>
+      <label>모드</label>
+      <select id="modeSel">
+        <option value="webrtc">WebRTC</option>
+        <option value="mse">MSE</option>
+        <option value="auto">Auto</option>
+      </select>
+      <label>개수</label>
+      <select id="countSel">
+        <option value="4">4</option>
+        <option value="9">9</option>
+        <option value="16">16</option>
+        <option value="20" selected>20</option>
+      </select>
+    </div>
+    <div class="grid" id="grid"></div>
+
+    <script src="/js/dashboard-real.js"></script>
+  </body>
+</html>

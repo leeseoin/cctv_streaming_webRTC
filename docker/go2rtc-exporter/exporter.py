@@ -475,7 +475,7 @@ def collect():
         daily_camera_peak_readers.labels(camera=cam_name).set(stats["peak_readers"])
 
     # ── IP TOP 10 ──
-    ip_sorted = sorted(daily_state["ip_stats"].items(), key=lambda x: x[1]["sessions"], reverse=True)[:10]
+    ip_sorted = sorted(daily_state["ip_stats"].items(), key=lambda x: x[1]["sessions"], reverse=True)[:100]
     daily_ip_sessions._metrics.clear()
     daily_ip_duration._metrics.clear()
     daily_ip_isp._metrics.clear()
