@@ -339,9 +339,6 @@ header.viewer video {
   font-weight: 500;
   opacity: 0;
   transform: translateY(-10px);
-  transition:
-    opacity 0.3s,
-    transform 0.3s;
   pointer-events: auto;
 }
 .toast.show {
