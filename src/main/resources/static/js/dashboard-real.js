@@ -7,12 +7,27 @@
  *
  * 각 셀 = embed.html iframe. 그 이상의 로직 없음.
  */
-const REAL_IDS = [
-  "cam01",
-  "cam120", "cam121", "cam122", "cam123", "cam124",
-  "cam125", "cam126", "cam127", "cam128", "cam129",
-  "cam130", "cam131", "cam132", "cam133", "cam134",
-  "cam135", "cam136", "cam137", "cam138",
+const REAL_CAMS = [
+  { id: "cam01",  label: "cam01" },
+  { id: "cam120", label: "50740 정류장 2번째 가로등" },
+  { id: "cam121", label: "읍내삼거리" },
+  { id: "cam122", label: "중리네거리" },
+  { id: "cam123", label: "한국유체기계앞 가로등" },
+  { id: "cam124", label: "오정네거리" },
+  { id: "cam125", label: "농수산 오거리" },
+  { id: "cam126", label: "모정네거리" },
+  { id: "cam127", label: "만년네거리" },
+  { id: "cam128", label: "과학공원네거리" },
+  { id: "cam129", label: "충대정문 오거리" },
+  { id: "cam130", label: "유성네거리" },
+  { id: "cam131", label: "45500 정류장 옆" },
+  { id: "cam132", label: "도안네거리" },
+  { id: "cam133", label: "관저네거리" },
+  { id: "cam134", label: "가수원 네거리" },
+  { id: "cam135", label: "한국타이어 교각 다리위" },
+  { id: "cam136", label: "보문산 오거리" },
+  { id: "cam137", label: "대전역 네거리" },
+  { id: "cam138", label: "대동오거리" },
 ];
 
 const modeSel = document.getElementById("modeSel");
@@ -28,22 +43,22 @@ countSel.value = String(Math.min(count, 20));
 
 function render() {
   grid.innerHTML = "";
-  const ids = REAL_IDS.slice(0, count);
-  const cols = ids.length <= 4 ? 2 : ids.length <= 9 ? 3 : ids.length <= 16 ? 4 : 5;
+  const cams = REAL_CAMS.slice(0, count);
+  const cols = cams.length <= 4 ? 2 : cams.length <= 9 ? 3 : cams.length <= 16 ? 4 : 5;
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
   grid.style.gridAutoRows = "1fr";
 
-  ids.forEach((id) => {
+  cams.forEach((cam) => {
     const cell = document.createElement("div");
     cell.className = "cell";
 
     const iframe = document.createElement("iframe");
-    iframe.src = `/embed.html?cam=${encodeURIComponent(id)}&mode=${encodeURIComponent(mode)}`;
+    iframe.src = `/embed.html?cam=${encodeURIComponent(cam.id)}&mode=${encodeURIComponent(mode)}`;
     iframe.allow = "autoplay; fullscreen";
 
     const label = document.createElement("div");
     label.className = "label";
-    label.textContent = id;
+    label.textContent = cam.label;
 
     cell.appendChild(iframe);
     cell.appendChild(label);

@@ -1,8 +1,0 @@
-# prod 프로파일: 원격 서버 (AWS 역할)
-# go2rtc는 온프레미스에서 Docker로 실행 → SSH 터널로 접근 (localhost:1984)
-# ProcessManagerService는 @Profile("!docker")이므로 prod에서는 활성화됨
-#   → prod에서도 비활성화 필요: !docker AND !prod
-
-app:
-  go2rtc:
-    api-url: http://localhost:1984

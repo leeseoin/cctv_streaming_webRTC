@@ -96,7 +96,7 @@ function createPlayer(mode) {
         }
         overlay.classList.add("hidden");
         showBadge(mode);
-        enableControls(); // loadeddata 시점에 한 번 더 보장
+        disableControls(); // loadeddata 시점에 한 번 더 native controls 비활성화
         console.log(`[embed] 영상 수신 성공 — mode=${mode}`);
       },
       { once: true },
