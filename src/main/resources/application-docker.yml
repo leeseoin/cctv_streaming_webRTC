@@ -1,8 +1,7 @@
 # Docker 프로파일
-# go2rtc가 Docker 컨테이너로 실행되므로 ProcessManagerService 비활성화 (@Profile("!docker"))
+
 # go2rtc API URL은 Docker 포트 매핑(1984:1984)으로 localhost 그대로 사용
 
 app:
   go2rtc:
-    api-url: http://localhost:1984
-    # binary, config는 사용하지 않음 (ProcessManagerService 비활성화)
+    api-url: http://172.17.0.1:1984

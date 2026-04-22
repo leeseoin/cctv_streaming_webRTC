@@ -1,10 +1,15 @@
 # ═══════════════════════════════════════════════════════════
-# On-Premise Docker Compose
-# 영상 스트리밍 + 모니터링 스택
+# On-Premise Docker Compose (우분투 서버 배포용)
 #
-# [스트리밍]  go2rtc, frontend, mediamtx
-# [모니터링]  go2rtc-exporter → prometheus ← node-exporter
-# [대시보드]  AWS Grafana → autossh 터널 → prometheus:9090
+# Docker Hub 이미지 사용 (빌드 없음)
+# seoin0319/chatbot-poc:go2rtc
+# seoin0319/chatbot-poc:go2rtc-exporter
+#
+# 사전 준비:
+#   1. .env 파일 생성 (CAM_RTSP_USER, CAM_RTSP_PASS, CAM_IP)
+#   2. docker/go2rtc/go2rtc.yml 서버 환경에 맞게 수정 (candidates)
+#   3. docker/go2rtc/certs/ 에 SSL 인증서 배치 (cert.pem, key.pem)
+#   4. 공유기 포트포워딩: 443→8443(TCP), 8555(UDP), 80(임시)
 # ═══════════════════════════════════════════════════════════
 
 services:
@@ -12,11 +17,8 @@ services:
   # 스트리밍
   # ─────────────────────────────────────
 
-  # go2rtc: 미디어 서버 (RTSP → WebRTC/HLS remux)
   go2rtc:
-    build:
-      context: .
-      dockerfile: docker/go2rtc/Dockerfile
+    image: seoin0319/chatbot-poc:go2rtc
     container_name: go2rtc
     restart: unless-stopped
     env_file:
@@ -25,24 +27,13 @@ services:
       - ./docker/go2rtc/go2rtc.yml:/config/go2rtc.yaml
       - ./docker/go2rtc/certs:/certs:ro
     ports:
-      - "1984:1984" # API HTTP (Spring Boot에서 접근)
-      - "8443:443" # API HTTPS (go2rtc 자체 SSL, HTTP/2)
-      - "8555:8555" # WebRTC UDP
+      - "1984:1984" # API HTTP
+      # - "8443:8443/tcp"    # API HTTPS # 8443 TCP 제거, Nginx가 대신 잡음
+      - "8443:8443/udp" # WebRTC UDP
       - "8554:8554" # RTSP 리스트림
     depends_on:
       - mediamtx
 
-  # frontend: 정적 파일 서빙 (Nginx)
-  frontend:
-    build:
-      context: .
-      dockerfile: docker/frontend/Dockerfile
-    container_name: frontend
-    restart: unless-stopped
-    ports:
-      - "3000:80" # 프론트엔드 웹 UI
-
-  # mediamtx: CCTV 에뮬레이터용 RTSP 서버
   mediamtx:
     image: bluenviron/mediamtx:latest
     container_name: mediamtx
@@ -50,30 +41,55 @@ services:
     volumes:
       - ./docker/mediamtx/mediamtx.yml:/mediamtx.yml
     ports:
-      - "8553:8553" # RTSP (에뮬레이터 영상 수신)
+      - "8553:8553" # RTSP (에뮬레이터)
 
   # ─────────────────────────────────────
-  # 모니터링: 수집
+  # ptz(Spring Boot)
   # ─────────────────────────────────────
 
-  # go2rtc-exporter: go2rtc API 폴링 → Prometheus 메트릭
-  # - 스트림/세션/IP/프로토콜 추적, Daily 자정 리셋
+  ptz-service:
+    image: seoin0319/chatbot-poc:cctv-spring-boot
+    container_name: ptz-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - SPRING_PROFILES_ACTIVE=onprem
+    ports:
+      - "8086:8085"
+
+  # ─────────────────────────────────────
+  # 모니터링
+  # ─────────────────────────────────────
+
   go2rtc-exporter:
-    build:
-      context: ./docker/go2rtc-exporter
-      dockerfile: Dockerfile
+    image: seoin0319/chatbot-poc:go2rtc-exporter
     container_name: go2rtc-exporter
     restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
     ports:
-      - "1985:1985" # Prometheus 스크랩 엔드포인트
+      - "1985:1985" # Prometheus 스크랩
     depends_on:
       - go2rtc
 
-  # node-exporter: OS 시스템 메트릭 (CPU/메모리/디스크/네트워크)
+  # camera-label-exporter: 카메라 ID → 현장명 매핑을 Prometheus 메트릭(camera_info)으로 노출
+  # - cameras.yml 편집 → 30초 내 자동 반영 (재시작 불필요)
+  # - Grafana Table 패널에서 camera_info + Transform(Labels to fields)으로 별도 표 생성
+  camera-label-exporter:
+    image: seoin0319/chatbot-poc:camera-label-exporter
+    container_name: camera-label-exporter
+    restart: unless-stopped
+    volumes:
+      - ./docker/camera-label-exporter/cameras.yml:/app/cameras.yml:ro
+    ports:
+      - "1986:1986" # Prometheus 스크랩 엔드포인트
+
   node-exporter:
     image: prom/node-exporter:latest
     container_name: node-exporter
     restart: unless-stopped
+    network_mode: host
     pid: host
     volumes:
       - /proc:/host/proc:ro
@@ -83,15 +99,9 @@ services:
       - "--path.procfs=/host/proc"
       - "--path.sysfs=/host/sys"
       - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
-    ports:
-      - "9100:9100" # Prometheus 스크랩 엔드포인트
+    # ports:
+    #   - "9100:9100"   # Prometheus 스크랩
 
-  # ─────────────────────────────────────
-  # 모니터링: 저장
-  # ─────────────────────────────────────
-
-  # prometheus: 메트릭 수집/저장 (TSDB)
-  # - go2rtc-exporter, node-exporter, Spring Boot Actuator 스크랩
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -106,4 +116,4 @@ services:
       - node-exporter
 
 volumes:
-  prometheus_data: # Prometheus 시계열 데이터
+  prometheus_data:
