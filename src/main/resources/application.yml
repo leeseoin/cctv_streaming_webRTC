@@ -36,3 +36,6 @@ app:
     isapi-port: ${ISAPI_PORT:80}
     isapi-user: ${CAM_RTSP_USER:admin}
     isapi-pass: ${CAM_RTSP_PASS:admin}
+    onvif-port: ${ONVIF_PORT:80}
+    onvif-user: ${ONVIF_USER:admin}
+    onvif-pass: ${ONVIF_PASS:admin}

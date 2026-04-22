@@ -1,0 +1,15 @@
+# onprem 프로파일: On-Premise PTZ 전용
+# 카메라와 같은 LAN에서 ONVIF PTZ 직접 제어
+# 포트포워딩 불필요 (내부 IP로 접근)
+
+app:
+  go2rtc:
+    api-url: http://go2rtc:1984
+  camera:
+    ip: ${CAM_IP:192.168.0.80}
+    isapi-port: ${ISAPI_PORT:80}
+    isapi-user: ${CAM_RTSP_USER:admin}
+    isapi-pass: ${CAM_RTSP_PASS:admin}
+    onvif-port: ${ONVIF_PORT:80}
+    onvif-user: ${ONVIF_USER:admin}
+    onvif-pass: ${ONVIF_PASS:admin}

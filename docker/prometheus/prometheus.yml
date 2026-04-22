@@ -16,6 +16,12 @@ scrape_configs:
       - targets: ['go2rtc-exporter:1985']
     scrape_interval: 5s
 
+  # 카메라 ID → 현장명 매핑 (camera-label-exporter)
+  - job_name: 'camera-labels'
+    static_configs:
+      - targets: ['camera-label-exporter:1986']
+    scrape_interval: 30s
+
   # 시스템 메트릭 (node-exporter)
   - job_name: 'node'
     static_configs:
