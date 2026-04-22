@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Spring Boot Actuator
+  - job_name: 'spring-boot'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['115.68.229.44:8085']
+    scrape_interval: 10s
+
+  # go2rtc 메트릭 (go2rtc-exporter)
+  - job_name: 'go2rtc'
+    static_configs:
+      - targets: ['go2rtc-exporter:1985']
+    scrape_interval: 5s
+
+  # 시스템 메트릭 (node-exporter)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

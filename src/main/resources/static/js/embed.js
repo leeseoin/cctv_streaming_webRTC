@@ -1,19 +1,28 @@
 /**
- * embed.js — nexbean 스타일 CCTV 임베딩 플레이어
+ * embed.js — nexbean 스타일 CCTV 임베딩 플레이어 (video-stream 기반)
  *
- * 사용법: /embed.html?cam=cam01
- * 3단계 패널: 닫힘(0) → 화살표(2) → 전체 패널(3)
+ * URL 파라미터:
+ *   ?cam=cam01            카메라 ID (필수)
+ *   ?mode=auto|webrtc|hls 스트리밍 모드 (기본: auto)
+ *
+ * video-stream 웹컴포넌트가 WebRTC → MSE → HLS 자동 Failover 처리.
  */
 const params = new URLSearchParams(location.search);
 const cameraId = params.get("cam");
-const video = document.getElementById("video");
+const streamMode = params.get("mode") || "auto";
+let video = null; // video-stream 엘리먼트 (connect에서 동적 생성)
+const viewer = document.getElementById("viewer");
 const overlay = document.getElementById("overlay");
 const statusEl = document.getElementById("status");
-const modeBadge = document.getElementById("modeBadge");
+const modeBadge = document.getElementById("modeBadge"); // 배지 비활성화됨 (null)
 
-let pc = null;
-let currentMode = null;
-let streamMode = "webrtc-hls";
+// mode 파라미터 → video-rtc mode 속성 매핑
+const modeMap = {
+  auto: "webrtc,mse,hls",
+  webrtc: "webrtc",
+  mse: "mse",
+  hls: "hls",
+};
 
 // ── 초기화 ──
 if (!cameraId) {
@@ -21,157 +30,103 @@ if (!cameraId) {
   statusEl.classList.add("error");
 } else {
   document.title = cameraId + " - CCTV";
-  connect();
-}
-
-// ── 패널 3단계 제어 (nexbean setbtn 동일) ──
-function setPanel(stage) {
-  const openBtn = document.getElementById("openBtn");
-  const closeBtn = document.getElementById("closeBtn");
-  const refreshBtn = document.getElementById("refreshBtn");
-  const modeSelector = document.getElementById("modeSelector");
-  const angleUp = document.getElementById("angleUp");
-  const angleDown = document.getElementById("angleDown");
-  const panel = document.getElementById("controlPanel");
-  const boxes = document.querySelectorAll(".func-box1");
-
-  if (stage === 0) {
-    // 닫힘: 우하단 열기 버튼만
-    openBtn.style.display = "block";
-    closeBtn.style.display = "none";
-    refreshBtn.style.display = "none";
-    modeSelector.style.display = "none";
-    angleUp.style.display = "none";
-    angleDown.style.display = "none";
-    panel.style.display = "none";
-    boxes.forEach((b) => (b.style.display = "none"));
-  } else if (stage === 2) {
-    // 화살표만: 하단 중앙 위쪽 화살표
-    openBtn.style.display = "none";
-    closeBtn.style.display = "none";
-    refreshBtn.style.display = "block";
-    modeSelector.style.display = "flex";
-    angleUp.style.display = "block";
-    angleDown.style.display = "none";
-    panel.style.display = "none";
-    boxes.forEach((b) => (b.style.display = "none"));
-  } else if (stage === 3) {
-    // 전체 패널: 모든 기능 박스 표시
-    openBtn.style.display = "none";
-    closeBtn.style.display = "block";
-    refreshBtn.style.display = "block";
-    modeSelector.style.display = "flex";
-    angleUp.style.display = "none";
-    angleDown.style.display = "block";
-    panel.style.display = "block";
-    boxes.forEach((b) => (b.style.display = "block"));
-  }
-}
-
-// 초기 상태
-setPanel(0);
-
-// 창 크기 변경 시 패널 닫기
-window.onresize = function () {
-  if (window.innerWidth < 1280) {
-    setPanel(0);
-  }
-};
-
-// ── 연결 ──
-function connect() {
-  disconnect();
-  if (streamMode === "hls") {
-    startMp4(cameraId);
-  } else {
-    connectWebRTC(cameraId);
-  }
-}
-
-async function connectWebRTC(camId) {
-  setStatus("WebRTC 연결 중...");
-  overlay.classList.remove("hidden");
-
-  try {
-    pc = new RTCPeerConnection();
-
-    pc.ontrack = (event) => {
-      video.srcObject = event.streams[0];
-      currentMode = "webrtc";
-      overlay.classList.add("hidden");
-      showBadge("webrtc");
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      const state = pc.iceConnectionState;
-      if (state === "failed") {
-        if (pc) { pc.close(); pc = null; }
-        if (streamMode === "webrtc-hls") {
-          startMp4(camId);
-        } else {
-          setStatus("WebRTC 연결 실패");
-        }
-      } else if (state === "disconnected") {
-        setStatus("연결 끊김");
-        overlay.classList.remove("hidden");
-      }
-    };
-
-    pc.addTransceiver("video", { direction: "recvonly" });
-    pc.addTransceiver("audio", { direction: "recvonly" });
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    const response = await fetch(`/api/cameras/${camId}/webrtc`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: offer.type, sdp: offer.sdp }),
+  updateModeIndicator();
+  // video-stream 커스텀 엘리먼트 등록 대기 후 연결
+  customElements
+    .whenDefined("video-stream")
+    .then(connect)
+    .catch((e) => {
+      console.error("[video-stream] 로드 실패:", e);
+      setStatus("플레이어 로드 실패");
+      statusEl.classList.add("error");
     });
+}
 
-    if (!response.ok) throw new Error("서버 응답 오류: " + response.status);
+let fallbackTimer = null;
 
-    const answer = await response.json();
-    await pc.setRemoteDescription(answer);
-  } catch (e) {
-    console.error("[embed] WebRTC 실패:", e);
-    if (pc) { pc.close(); pc = null; }
-    if (streamMode === "webrtc-hls") {
-      startMp4(camId);
-    } else {
-      setStatus("WebRTC 연결 실패: " + e.message);
+function createPlayer(mode) {
+  // 기존 엘리먼트 제거
+  if (video) {
+    video.remove();
+    video = null;
+  }
+  if (fallbackTimer) {
+    clearTimeout(fallbackTimer);
+    fallbackTimer = null;
+  }
+
+  console.log(`[embed] createPlayer mode=${mode}`);
+  setStatus(`${mode.toUpperCase()} 연결 중...`);
+  overlay.classList.remove("hidden");
+
+  // stream.html 패턴: 생성 → 속성 설정 → DOM 삽입
+  video = document.createElement("video-stream");
+  video.id = "video";
+  video.background = true;
+  video.muted = true;
+  video.mode = mode;
+  video.src = new URL(`api/ws?src=${encodeURIComponent(cameraId)}&media=video`, CONFIG.GO2RTC_BASE + "/");
+  viewer.appendChild(video);
+
+  // native controls 비활성화 (클릭 시 pause 방지, 좌측 상단 풀스크린 버튼 사용)
+  const disableControls = () => {
+    const v = video?.video || video?.querySelector?.("video");
+    if (v) {
+      v.controls = false;
+      v.removeAttribute("controls");
+      return true;
     }
+    return false;
+  };
+  if (!disableControls()) {
+    const tid = setInterval(() => {
+      if (disableControls()) clearInterval(tid);
+    }, 200);
+    setTimeout(() => clearInterval(tid), 5000);
+  }
+
+  const inner = video.video || video.querySelector("video");
+  if (inner) {
+    inner.addEventListener(
+      "loadeddata",
+      () => {
+        if (fallbackTimer) {
+          clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+        overlay.classList.add("hidden");
+        showBadge(mode);
+        disableControls(); // loadeddata 시점에 한 번 더 native controls 비활성화
+        console.log(`[embed] 영상 수신 성공 — mode=${mode}`);
+      },
+      { once: true },
+    );
   }
 }
 
-function startMp4(camId) {
-  setStatus("HTTP Stream 연결 중...");
-  overlay.classList.remove("hidden");
-
-  video.pause();
-  video.srcObject = null;
-  video.src = `/go2rtc/api/stream.mp4?src=${camId}`;
-
-  video.addEventListener("loadeddata", () => {
-    video.play().catch(() => {});
-    currentMode = "hls";
-    overlay.classList.add("hidden");
-    showBadge("hls");
-  }, { once: true });
-
-  video.addEventListener("error", () => {
-    setStatus("스트림 연결 실패");
-    statusEl.classList.add("error");
-  }, { once: true });
+function connect() {
+  if (streamMode === "auto") {
+    // WebRTC 4초 시도 → 실패 시 MSE 4초 → 실패 시 HLS
+    createPlayer("webrtc");
+    fallbackTimer = setTimeout(() => {
+      console.log("[embed] WebRTC 타임아웃 → MSE fallback");
+      createPlayer("mse");
+      fallbackTimer = setTimeout(() => {
+        console.log("[embed] MSE 타임아웃 → HLS fallback");
+        createPlayer("hls");
+      }, 4000);
+    }, 4000);
+  } else {
+    createPlayer(modeMap[streamMode] || "webrtc");
+  }
 }
 
-function disconnect() {
-  if (pc) { pc.close(); pc = null; }
-  video.pause();
-  video.srcObject = null;
-  video.removeAttribute("src");
-  currentMode = null;
-  modeBadge.className = "mode-badge";
+// ── 모드 인디케이터 ──
+function updateModeIndicator() {
+  const indicator = document.getElementById("modeIndicator");
+  if (!indicator) return;
+  const labels = { auto: "Auto (WebRTC→MSE→HLS)", webrtc: "WebRTC Only", mse: "MSE Only", hls: "HLS Only" };
+  indicator.textContent = labels[streamMode] || streamMode;
 }
 
 // ── 상태 표시 ──
@@ -182,21 +137,62 @@ function setStatus(text) {
 }
 
 function showBadge(mode) {
-  modeBadge.className = "mode-badge " + mode;
-  modeBadge.textContent = mode === "webrtc" ? "WebRTC" : "HTTP Stream";
+  if (!modeBadge) return;
+  const m = mode.startsWith("webrtc") ? "webrtc" : mode;
+  modeBadge.className = "mode-badge " + m;
+  modeBadge.textContent = m === "webrtc" ? "WebRTC" : m.toUpperCase();
 }
 
-// ── 스트리밍 모드 전환 ──
-function switchMode(btn) {
-  document.querySelectorAll(".mode-btn").forEach((b) => b.classList.remove("active"));
-  btn.classList.add("active");
-  streamMode = btn.dataset.mode;
-  connect();
+// ── 패널 3단계 제어 (nexbean setbtn 동일) ──
+function setPanel(stage) {
+  const openBtn = document.getElementById("openBtn");
+  const closeBtn = document.getElementById("closeBtn");
+  const refreshBtn = document.getElementById("refreshBtn");
+  const modeIndicatorWrap = document.getElementById("modeIndicatorWrap");
+  const angleUp = document.getElementById("angleUp");
+  const angleDown = document.getElementById("angleDown");
+  const panel = document.getElementById("controlPanel");
+  const boxes = document.querySelectorAll(".func-box1");
+
+  if (stage === 0) {
+    openBtn.style.display = "block";
+    closeBtn.style.display = "none";
+    refreshBtn.style.display = "none";
+    if (modeIndicatorWrap) modeIndicatorWrap.style.display = "none";
+    angleUp.style.display = "none";
+    angleDown.style.display = "none";
+    panel.style.display = "none";
+    boxes.forEach((b) => (b.style.display = "none"));
+  } else if (stage === 2) {
+    openBtn.style.display = "none";
+    closeBtn.style.display = "none";
+    refreshBtn.style.display = "block";
+    if (modeIndicatorWrap) modeIndicatorWrap.style.display = "flex";
+    angleUp.style.display = "block";
+    angleDown.style.display = "none";
+    panel.style.display = "none";
+    boxes.forEach((b) => (b.style.display = "none"));
+  } else if (stage === 3) {
+    openBtn.style.display = "none";
+    closeBtn.style.display = "block";
+    refreshBtn.style.display = "block";
+    if (modeIndicatorWrap) modeIndicatorWrap.style.display = "flex";
+    angleUp.style.display = "none";
+    angleDown.style.display = "block";
+    panel.style.display = "block";
+    boxes.forEach((b) => (b.style.display = "block"));
+  }
 }
+
+setPanel(0);
+
+window.onresize = function () {
+  if (window.innerWidth < 1280) setPanel(0);
+};
 
 // ── PTZ 제어 ──
 function ptzCtrl(pan, tilt, zoom) {
-  fetch(`/api/ptz/${cameraId}/move`, {
+  fetch(`${CONFIG.GO2RTC_BASE}/api/ptz/${cameraId}/move`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pan, tilt, zoom }),

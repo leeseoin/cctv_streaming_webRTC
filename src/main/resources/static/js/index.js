@@ -3,6 +3,7 @@ let currentMode = null;     // 'webrtc' 또는 'hls'
 let statsInterval = null;
 let prevBytesReceived = 0;
 let prevTimestamp = 0;
+let hlsInstance = null;     // hls.js 인스턴스
 const video = document.getElementById('video');
 const status = document.getElementById('status');
 const connectBtn = document.getElementById('connectBtn');
@@ -31,47 +32,9 @@ async function connect() {
     }
 
     try {
-        // ICE 모드에 따라 설정 결정
-        const iceMode = document.querySelector('input[name="iceMode"]:checked').value;
         const rtcConfig = {};
 
-        if (iceMode === 'turn') {
-            rtcConfig.iceServers = [
-                { urls: 'stun:192.168.0.83:3478' },
-                {
-                    urls: 'turn:192.168.0.83:3478',
-                    username: 'cctv',
-                    credential: 'cctv1234'
-                }
-            ];
-        }
-        // relay 모드: TURN만 사용 (STUN 불필요, P2P 차단)
-        if (iceMode === 'relay') {
-            rtcConfig.iceServers = [
-                {
-                    urls: [
-                        'turn:192.168.0.83:3478?transport=udp',
-                        'turn:192.168.0.83:3478?transport=tcp'
-                    ],
-                    username: 'cctv',
-                    credential: 'cctv1234'
-                }
-            ];
-            rtcConfig.iceTransportPolicy = 'relay';
-        }
-        // 공개 TURN 테스트용 (coturn 문제 분리용)
-        if (iceMode === 'test') {
-            rtcConfig.iceServers = [
-                {
-                    urls: 'turn:standard.relay.metered.ca:443?transport=tcp',
-                    username: 'b093c0673684ba88af1de99b',
-                    credential: '2X3OoXjOqLgjRGWY'
-                }
-            ];
-            rtcConfig.iceTransportPolicy = 'relay';
-        }
-
-        console.log('ICE 모드:', iceMode, 'RTCConfig:', JSON.stringify(rtcConfig));
+        console.log('RTCConfig:', JSON.stringify(rtcConfig));
 
         pc = new RTCPeerConnection(rtcConfig);
 
@@ -87,7 +50,7 @@ async function connect() {
                 currentMode = 'webrtc';
                 setStatus('연결됨 - ' + cameraId + ' <span class="webrtc-badge">WebRTC</span>', 'connected');
             } else if (state === 'checking') {
-                setStatus('ICE 연결 확인 중... (' + iceMode + ')', 'connecting');
+                setStatus('ICE 연결 확인 중...', 'connecting');
             } else if (state === 'failed') {
                 if (pc) { pc.close(); pc = null; }
                 // WebRTC + HLS Failover 모드일 때만 자동 전환
@@ -152,7 +115,7 @@ async function connect() {
 
         // Java 서버에 SDP offer 전송
         console.log('[4] SDP offer 전송 시작');
-        const response = await fetch(`/api/cameras/${cameraId}/webrtc`, {
+        const response = await fetch(`${CONFIG.API_BASE}/api/cameras/${cameraId}/webrtc`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -189,6 +152,10 @@ function disconnect() {
         pc.close();
         pc = null;
     }
+    if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+    }
     video.srcObject = null;
     video.removeAttribute('src');
     video.load();
@@ -205,31 +172,52 @@ function setStatus(text, className) {
 }
 
 /**
- * HLS Failover: WebRTC 실패 시 go2rtc MP4 스트림으로 전환
- * go2rtc의 MP4 출력을 Java 프록시(/go2rtc/api/stream.mp4)를 통해 재생
+ * HLS Failover: WebRTC 실패 시 go2rtc HLS 스트림으로 전환
+ * go2rtc의 HLS 출력(/api/stream.m3u8)을 hls.js로 재생
  */
 function fallbackToHls(cameraId) {
-    setStatus('HTTP 스트림 전환 중...', 'connecting');
+    setStatus('HLS 스트림 전환 중...', 'connecting');
 
     // 이전 재생 상태 정리
     video.pause();
     video.srcObject = null;
+    if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
 
-    const mp4Url = `/go2rtc/api/stream.mp4?src=${cameraId}`;
-    video.src = mp4Url;
+    const hlsUrl = `${CONFIG.GO2RTC_BASE}/api/stream.m3u8?src=${cameraId}`;
 
-    video.addEventListener('loadeddata', () => {
-        video.play().catch(() => {});
-        currentMode = 'hls';
-        setStatus('연결됨 - ' + cameraId + ' <span class="hls-badge">HTTP Stream</span>', 'connected');
-        disconnectBtn.disabled = false;
-        startStats(); // HTTP 스트림 통계도 수집
-    }, { once: true });
-
-    video.addEventListener('error', () => {
-        setStatus('HTTP 스트림 연결 실패', 'disconnected');
-        connectBtn.disabled = false;
-    }, { once: true });
+    if (Hls.isSupported()) {
+        hlsInstance = new Hls();
+        hlsInstance.loadSource(hlsUrl);
+        hlsInstance.attachMedia(video);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.play().catch(() => {});
+            currentMode = 'hls';
+            setStatus('연결됨 - ' + cameraId + ' <span class="hls-badge">HLS</span>', 'connected');
+            disconnectBtn.disabled = false;
+            startStats();
+        });
+        hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) {
+                console.error('[HLS] 치명적 오류:', data);
+                setStatus('HLS 스트림 연결 실패', 'disconnected');
+                connectBtn.disabled = false;
+            }
+        });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari 네이티브 HLS
+        video.src = hlsUrl;
+        video.addEventListener('loadeddata', () => {
+            video.play().catch(() => {});
+            currentMode = 'hls';
+            setStatus('연결됨 - ' + cameraId + ' <span class="hls-badge">HLS</span>', 'connected');
+            disconnectBtn.disabled = false;
+            startStats();
+        }, { once: true });
+        video.addEventListener('error', () => {
+            setStatus('HLS 스트림 연결 실패', 'disconnected');
+            connectBtn.disabled = false;
+        }, { once: true });
+    }
 }
 
 // 통계 수집
@@ -280,7 +268,7 @@ async function collectStats() {
         document.getElementById('stat-jitter').textContent = '-';
         document.getElementById('stat-bitrate').textContent = '-';
         document.getElementById('stat-packetloss').textContent = '-';
-        document.getElementById('stat-connection').textContent = '연결 방식: HTTP Stream (MP4)';
+        document.getElementById('stat-connection').textContent = '연결 방식: HLS';
         return;
     }
 

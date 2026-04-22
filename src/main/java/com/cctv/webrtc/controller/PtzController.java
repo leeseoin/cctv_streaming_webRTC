@@ -1,16 +1,21 @@
 package com.cctv.webrtc.controller;
 
 import com.cctv.webrtc.service.PtzService;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
 /**
- * PTZ 제어 API
+ * PTZ 제어 API (ONVIF SOAP)
  * POST /api/ptz/{id}/move  — 연속 이동 (pan/tilt/zoom)
  * POST /api/ptz/{id}/stop  — 정지
+ *
+ * @Profile("onprem") — On-Premise에서만 활성화
+ * AWS-A(docker 프로파일)에서는 비활성화
  */
+@Profile("onprem")
 @RestController
 @RequestMapping("/api/ptz")
 public class PtzController {

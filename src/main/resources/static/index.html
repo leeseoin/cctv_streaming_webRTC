@@ -1,77 +1,29 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CCTV Streamer</title>
-    <link rel="stylesheet" href="/css/index.css">
-</head>
-<body>
-    <h1>CCTV Streamer</h1>
-    <div style="margin-bottom: 15px; font-size: 13px;">
-        <a href="/dashboard.html" style="color: #e94560;">40CH Dashboard →</a> |
-        <a href="/monitor.html" style="color: #e94560;">System Monitor →</a>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CCTV Streaming Service</title>
+    <link rel="stylesheet" href="/css/index.css" />
+  </head>
+  <body>
+    <h1>CCTV Streaming Service</h1>
+    <div class="card-grid">
+      <a href="/embed.html?cam=cam01" class="card">
+        <div class="card-icon">📹</div>
+        <div class="card-title">CCTV 뷰어</div>
+        <div class="card-desc">단일 카메라 실시간 스트리밍</div>
+      </a>
+      <a href="/dashboard-real.html?count=20" class="card">
+        <div class="card-icon">🖥️</div>
+        <div class="card-title">CCTV Dashboard</div>
+        <div class="card-desc">다중 카메라 그리드 대시보드</div>
+      </a>
+      <a href="/grafana" class="card">
+        <div class="card-icon">📊</div>
+        <div class="card-title">System Monitor</div>
+        <div class="card-desc">서버 리소스 모니터링</div>
+      </a>
     </div>
-
-    <div class="controls">
-        <select id="cameraSelect">
-            <option value="cam01">cam01 (메인)</option>
-            <option value="cam01_sub">cam01_sub (서브)</option>
-        </select>
-        <button id="connectBtn" onclick="connect()">연결</button>
-        <button id="disconnectBtn" onclick="disconnect()" disabled>해제</button>
-    </div>
-    <div class="controls" style="font-size: 13px;">
-        <label><input type="radio" name="streamMode" value="webrtc" checked> WebRTC (저지연)</label>
-        <label><input type="radio" name="streamMode" value="hls"> HLS (HTTP, 안정적)</label>
-        <label><input type="radio" name="streamMode" value="webrtc-hls"> WebRTC + HLS Failover</label>
-    </div>
-    <div class="controls" style="font-size: 13px;" id="iceModePanel">
-        <label><input type="radio" name="iceMode" value="p2p" checked> P2P (직접 연결)</label>
-        <label><input type="radio" name="iceMode" value="turn"> TURN (중계 경유)</label>
-        <label><input type="radio" name="iceMode" value="relay"> TURN 강제 (P2P 차단)</label>
-        <label><input type="radio" name="iceMode" value="test" style="margin-left:10px"> 공개TURN 테스트</label>
-    </div>
-
-    <div id="status" class="disconnected">연결 안 됨</div>
-
-    <video id="video" autoplay muted playsinline></video>
-
-    <div class="stats-panel" id="statsPanel">
-        <h3 id="statsTitle">연결 통계 (1초마다 갱신)</h3>
-        <div class="stats-grid">
-            <div class="stat-item">
-                <div class="stat-label">지연시간 (RTT)</div>
-                <div><span class="stat-value" id="stat-rtt">-</span> <span class="stat-unit">ms</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Jitter (떨림)</div>
-                <div><span class="stat-value" id="stat-jitter">-</span> <span class="stat-unit">ms</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">프레임률</div>
-                <div><span class="stat-value" id="stat-fps">-</span> <span class="stat-unit">fps</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">비트레이트</div>
-                <div><span class="stat-value" id="stat-bitrate">-</span> <span class="stat-unit">kbps</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">해상도</div>
-                <div><span class="stat-value" id="stat-resolution">-</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">패킷 손실</div>
-                <div><span class="stat-value" id="stat-packetloss">-</span> <span class="stat-unit">%</span></div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">드롭 프레임</div>
-                <div><span class="stat-value" id="stat-dropped">-</span> <span class="stat-unit">frames</span></div>
-            </div>
-        </div>
-        <div class="connection-type" id="stat-connection">연결 방식: -</div>
-    </div>
-
-    <script src="/js/index.js"></script>
-</body>
+  </body>
 </html>

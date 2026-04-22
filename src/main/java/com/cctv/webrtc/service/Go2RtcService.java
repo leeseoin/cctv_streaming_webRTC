@@ -60,6 +60,9 @@ public class Go2RtcService {
 
 			HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 			return response.body();
+		} catch (java.net.ConnectException e) {
+			log.debug("go2rtc 미연결 (시작 대기 중)");
+			throw new RuntimeException("go2rtc not ready", e);
 		} catch (Exception e) {
 			log.error("go2rtc getStreams error", e);
 			throw new RuntimeException("Failed to get streams from go2rtc", e);

@@ -3,6 +3,7 @@ package com.cctv.webrtc;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -10,6 +11,7 @@ import java.nio.file.Path;
 
 @SpringBootApplication        // Spring Boot 어플리케이션이라고 선언
 @ConfigurationPropertiesScan  // config/AppProperties 같은 설정 클래스를 자동으로 찾아서 등록
+@EnableScheduling             // @Scheduled 어노테이션 활성화 (SessionTracker 폴링용)
 public class WebrtcApplication {
 
 	public static void main(String[] args) {

@@ -9,33 +9,42 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import org.springframework.context.annotation.Profile;
+
 import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Hikvision ISAPI를 이용한 PTZ 제어
- * PUT /ISAPI/PTZCtrl/channels/1/continuous — 연속 이동 (pan/tilt/zoom)
- * Digest 인증을 수동으로 처리 (Java HttpClient Authenticator가 PUT에서 안 되는 문제 우회)
+ * ONVIF PTZ 제어 (SOAP over HTTP + Digest 인증)
+ * - ContinuousMove: 상하좌우 이동 + 줌인/줌아웃
+ * - Stop: 정지
+ *
+ * @Profile("onprem") — On-Premise에서만 활성화
  */
+@Profile("onprem")
 @Service
 public class PtzService {
 
 	private static final Logger log = LoggerFactory.getLogger(PtzService.class);
 
-	private final String baseUrl;
+	private final String cameraIp;
+	private final int onvifPort;
 	private final String username;
 	private final String password;
 	private final HttpClient httpClient;
 	private final AtomicInteger nc = new AtomicInteger(0);
+	private String profileToken;
 
 	public PtzService(AppProperties properties) {
 		var cam = properties.camera();
-		this.baseUrl = "http://" + cam.ip() + ":" + cam.isapiPort();
-		this.username = cam.isapiUser();
-		this.password = cam.isapiPass();
+		this.cameraIp = cam.ip().trim();
+		this.onvifPort = cam.onvifPort();
+		this.username = cam.onvifUser().trim();
+		this.password = cam.onvifPass().trim();
 		this.httpClient = HttpClient.newHttpClient();
+		this.profileToken = fetchProfileToken();
 	}
 
 	/**
@@ -45,85 +54,180 @@ public class PtzService {
 	 * @param zoom  축소(-) / 확대(+), 범위: -100 ~ 100
 	 */
 	public void continuousMove(int pan, int tilt, int zoom) {
-		String xml = """
-				<PTZData>
-				  <pan>%d</pan>
-				  <tilt>%d</tilt>
-				  <zoom>%d</zoom>
-				</PTZData>
-				""".formatted(pan, tilt, zoom);
+		float panSpeed = pan / 100.0f;
+		float tiltSpeed = tilt / 100.0f;
+		float zoomSpeed = zoom / 100.0f;
 
-		sendPtzCommand("/ISAPI/PTZCtrl/channels/1/continuous", xml);
+		String soap = """
+				<?xml version="1.0" encoding="UTF-8"?>
+				<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+				            xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"
+				            xmlns:tt="http://www.onvif.org/ver10/schema">
+				  <s:Body>
+				    <tptz:ContinuousMove>
+				      <tptz:ProfileToken>%s</tptz:ProfileToken>
+				      <tptz:Velocity>
+				        <tt:PanTilt x="%.2f" y="%.2f"/>
+				        <tt:Zoom x="%.2f"/>
+				      </tptz:Velocity>
+				    </tptz:ContinuousMove>
+				  </s:Body>
+				</s:Envelope>
+				""".formatted(profileToken, panSpeed, tiltSpeed, zoomSpeed);
+
+		sendOnvifCommand("/onvif/ptz_service", soap, "ContinuousMove");
 	}
 
 	/**
-	 * 정지 (pan=0, tilt=0, zoom=0 전송)
+	 * 정지
 	 */
 	public void stop() {
-		continuousMove(0, 0, 0);
+		String soap = """
+				<?xml version="1.0" encoding="UTF-8"?>
+				<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+				            xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl">
+				  <s:Body>
+				    <tptz:Stop>
+				      <tptz:ProfileToken>%s</tptz:ProfileToken>
+				      <tptz:PanTilt>true</tptz:PanTilt>
+				      <tptz:Zoom>true</tptz:Zoom>
+				    </tptz:Stop>
+				  </s:Body>
+				</s:Envelope>
+				""".formatted(profileToken);
+
+		sendOnvifCommand("/onvif/ptz_service", soap, "Stop");
 	}
 
-	private void sendPtzCommand(String path, String xmlBody) {
+	/**
+	 * ONVIF 명령 전송 (Digest 인증)
+	 */
+	private void sendOnvifCommand(String path, String soapBody, String action) {
 		try {
-			URI uri = URI.create(baseUrl + path);
+			URI uri = URI.create("http://" + cameraIp + ":" + onvifPort + path);
 
-			// 1단계: 인증 없이 요청 → 401 + WWW-Authenticate 헤더 받기
+			// 1단계: 인증 없이 요청 → 401 + WWW-Authenticate
 			HttpRequest firstRequest = HttpRequest.newBuilder()
 					.uri(uri)
-					.header("Content-Type", "application/xml")
-					.PUT(HttpRequest.BodyPublishers.ofString(xmlBody))
+					.header("Content-Type", "application/soap+xml; charset=utf-8")
+					.POST(HttpRequest.BodyPublishers.ofString(soapBody))
 					.build();
 
 			HttpResponse<String> firstResponse = httpClient.send(firstRequest, HttpResponse.BodyHandlers.ofString());
 
 			if (firstResponse.statusCode() != 401) {
-				// 인증 필요 없이 성공한 경우
-				handleResponse(path, firstResponse);
+				handleResponse(action, firstResponse);
 				return;
 			}
 
-			// 2단계: WWW-Authenticate 파싱 → Digest Authorization 헤더 생성
+			// 2단계: Digest Authorization 생성
 			String wwwAuth = firstResponse.headers()
 					.firstValue("WWW-Authenticate")
 					.orElse(null);
 
-			log.info("[Digest] WWW-Authenticate: {}", wwwAuth);
-			log.info("[Digest] 사용 계정: {}:{}", username, password);
-
 			if (wwwAuth == null || !wwwAuth.startsWith("Digest")) {
-				log.error("Digest 인증 헤더 없음: {}", firstResponse.headers().map());
+				log.error("[ONVIF] {} Digest 인증 헤더 없음", action);
 				return;
 			}
 
-			String authHeader = buildDigestAuth(wwwAuth, "PUT", path);
-			log.info("[Digest] Authorization: {}", authHeader);
+			String authHeader = buildDigestAuth(wwwAuth, "POST", path);
 
-			// 3단계: Authorization 헤더 포함해서 재요청
+			// 3단계: Authorization 포함해서 재요청
 			HttpRequest authRequest = HttpRequest.newBuilder()
 					.uri(uri)
-					.header("Content-Type", "application/xml")
+					.header("Content-Type", "application/soap+xml; charset=utf-8")
 					.header("Authorization", authHeader)
-					.PUT(HttpRequest.BodyPublishers.ofString(xmlBody))
+					.POST(HttpRequest.BodyPublishers.ofString(soapBody))
 					.build();
 
 			HttpResponse<String> authResponse = httpClient.send(authRequest, HttpResponse.BodyHandlers.ofString());
-			handleResponse(path, authResponse);
+			handleResponse(action, authResponse);
 
 		} catch (Exception e) {
-			log.error("PTZ 명령 전송 오류: {}", path, e);
-		}
-	}
-
-	private void handleResponse(String path, HttpResponse<String> response) {
-		if (response.statusCode() >= 200 && response.statusCode() < 300) {
-			log.debug("PTZ 명령 성공: {}", path);
-		} else {
-			log.warn("PTZ 명령 실패: {} → HTTP {}: {}", path, response.statusCode(), response.body());
+			log.error("[ONVIF] {} 오류", action, e);
 		}
 	}
 
 	/**
-	 * WWW-Authenticate 헤더를 파싱하여 Digest Authorization 헤더 생성
+	 * Profile Token 자동 조회
+	 */
+	private String fetchProfileToken() {
+		try {
+			String soap = """
+					<?xml version="1.0" encoding="UTF-8"?>
+					<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+					            xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+					  <s:Body>
+					    <trt:GetProfiles/>
+					  </s:Body>
+					</s:Envelope>
+					""";
+
+			URI uri = URI.create("http://" + cameraIp + ":" + onvifPort + "/onvif/media_service");
+
+			// 1단계: 인증 없이 → 401
+			HttpRequest firstRequest = HttpRequest.newBuilder()
+					.uri(uri)
+					.header("Content-Type", "application/soap+xml; charset=utf-8")
+					.POST(HttpRequest.BodyPublishers.ofString(soap))
+					.build();
+
+			HttpResponse<String> firstResponse = httpClient.send(firstRequest, HttpResponse.BodyHandlers.ofString());
+
+			if (firstResponse.statusCode() != 401) {
+				return parseProfileToken(firstResponse.body());
+			}
+
+			// 2단계: Digest 인증
+			String wwwAuth = firstResponse.headers()
+					.firstValue("WWW-Authenticate")
+					.orElse(null);
+
+			if (wwwAuth == null || !wwwAuth.startsWith("Digest")) {
+				log.warn("[ONVIF] Profile Token 조회: Digest 헤더 없음, 기본값 사용");
+				return "Profile_1";
+			}
+
+			String authHeader = buildDigestAuth(wwwAuth, "POST", "/onvif/media_service");
+
+			HttpRequest authRequest = HttpRequest.newBuilder()
+					.uri(uri)
+					.header("Content-Type", "application/soap+xml; charset=utf-8")
+					.header("Authorization", authHeader)
+					.POST(HttpRequest.BodyPublishers.ofString(soap))
+					.build();
+
+			HttpResponse<String> authResponse = httpClient.send(authRequest, HttpResponse.BodyHandlers.ofString());
+			return parseProfileToken(authResponse.body());
+
+		} catch (Exception e) {
+			log.warn("[ONVIF] Profile Token 조회 실패, 기본값 사용: {}", e.getMessage());
+			return "Profile_1";
+		}
+	}
+
+	private String parseProfileToken(String body) {
+		var matcher = java.util.regex.Pattern.compile("token=\"([^\"]+)\"").matcher(body);
+		if (matcher.find()) {
+			String token = matcher.group(1);
+			log.info("[ONVIF] Profile Token 조회 성공: {}", token);
+			return token;
+		}
+		log.warn("[ONVIF] Profile Token 미발견, 기본값 사용");
+		return "Profile_1";
+	}
+
+	private void handleResponse(String action, HttpResponse<String> response) {
+		if (response.statusCode() >= 200 && response.statusCode() < 300) {
+			log.info("[ONVIF] {} 성공", action);
+		} else {
+			log.warn("[ONVIF] {} 실패: HTTP {} - {}", action, response.statusCode(),
+					response.body().substring(0, Math.min(response.body().length(), 200)));
+		}
+	}
+
+	/**
+	 * Digest Authorization 헤더 생성
 	 */
 	private String buildDigestAuth(String wwwAuth, String method, String digestUri) {
 		Map<String, String> params = parseDigestChallenge(wwwAuth);
@@ -137,17 +241,13 @@ public class PtzService {
 		String ncHex = String.format("%08x", ncValue);
 		String cnonce = Long.toHexString(System.nanoTime());
 
-		// HA1 = MD5(username:realm:password)
 		String ha1 = md5(username + ":" + realm + ":" + password);
-		// HA2 = MD5(method:digestUri)
 		String ha2 = md5(method + ":" + digestUri);
 
 		String response;
 		if (qop != null && qop.contains("auth")) {
-			// response = MD5(HA1:nonce:nc:cnonce:qop:HA2)
 			response = md5(ha1 + ":" + nonce + ":" + ncHex + ":" + cnonce + ":auth:" + ha2);
 		} else {
-			// response = MD5(HA1:nonce:HA2)
 			response = md5(ha1 + ":" + nonce + ":" + ha2);
 		}
 
@@ -169,15 +269,9 @@ public class PtzService {
 		return sb.toString();
 	}
 
-	/**
-	 * Digest 챌린지 파싱: key="value" 또는 key=value
-	 */
 	private Map<String, String> parseDigestChallenge(String header) {
 		Map<String, String> params = new HashMap<>();
-		// "Digest " 이후 부분
 		String content = header.substring(header.indexOf(' ') + 1);
-
-		// key="value" 패턴 매칭
 		var matcher = java.util.regex.Pattern.compile("(\\w+)=[\"']?([^\"',]+)[\"']?").matcher(content);
 		while (matcher.find()) {
 			params.put(matcher.group(1), matcher.group(2));

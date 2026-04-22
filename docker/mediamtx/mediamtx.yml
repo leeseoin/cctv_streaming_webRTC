@@ -1,0 +1,15 @@
+# mediamtx 설정 - CCTV 에뮬레이터용 RTSP 서버 (Docker)
+# 호스트 FFmpeg가 여기로 RTSP push → go2rtc가 여기서 pull
+
+rtsp: yes
+rtspAddress: :8553
+
+# 사용하지 않는 프로토콜 비활성화
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+
+paths:
+  all:
+    source: publisher

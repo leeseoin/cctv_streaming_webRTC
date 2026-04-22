@@ -1,0 +1,109 @@
+# ═══════════════════════════════════════════════════════════
+# On-Premise Docker Compose
+# 영상 스트리밍 + 모니터링 스택
+#
+# [스트리밍]  go2rtc, frontend, mediamtx
+# [모니터링]  go2rtc-exporter → prometheus ← node-exporter
+# [대시보드]  AWS Grafana → autossh 터널 → prometheus:9090
+# ═══════════════════════════════════════════════════════════
+
+services:
+  # ─────────────────────────────────────
+  # 스트리밍
+  # ─────────────────────────────────────
+
+  # go2rtc: 미디어 서버 (RTSP → WebRTC/HLS remux)
+  go2rtc:
+    build:
+      context: .
+      dockerfile: docker/go2rtc/Dockerfile
+    container_name: go2rtc
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./docker/go2rtc/go2rtc.yml:/config/go2rtc.yaml
+      - ./docker/go2rtc/certs:/certs:ro
+    ports:
+      - "1984:1984" # API HTTP (Spring Boot에서 접근)
+      - "8443:443" # API HTTPS (go2rtc 자체 SSL, HTTP/2)
+      - "8555:8555" # WebRTC UDP
+      - "8554:8554" # RTSP 리스트림
+    depends_on:
+      - mediamtx
+
+  # frontend: 정적 파일 서빙 (Nginx)
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80" # 프론트엔드 웹 UI
+
+  # mediamtx: CCTV 에뮬레이터용 RTSP 서버
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    restart: unless-stopped
+    volumes:
+      - ./docker/mediamtx/mediamtx.yml:/mediamtx.yml
+    ports:
+      - "8553:8553" # RTSP (에뮬레이터 영상 수신)
+
+  # ─────────────────────────────────────
+  # 모니터링: 수집
+  # ─────────────────────────────────────
+
+  # go2rtc-exporter: go2rtc API 폴링 → Prometheus 메트릭
+  # - 스트림/세션/IP/프로토콜 추적, Daily 자정 리셋
+  go2rtc-exporter:
+    build:
+      context: ./docker/go2rtc-exporter
+      dockerfile: Dockerfile
+    container_name: go2rtc-exporter
+    restart: unless-stopped
+    ports:
+      - "1985:1985" # Prometheus 스크랩 엔드포인트
+    depends_on:
+      - go2rtc
+
+  # node-exporter: OS 시스템 메트릭 (CPU/메모리/디스크/네트워크)
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    ports:
+      - "9100:9100" # Prometheus 스크랩 엔드포인트
+
+  # ─────────────────────────────────────
+  # 모니터링: 저장
+  # ─────────────────────────────────────
+
+  # prometheus: 메트릭 수집/저장 (TSDB)
+  # - go2rtc-exporter, node-exporter, Spring Boot Actuator 스크랩
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090" # Prometheus Web UI + API
+    depends_on:
+      - go2rtc-exporter
+      - node-exporter
+
+volumes:
+  prometheus_data: # Prometheus 시계열 데이터

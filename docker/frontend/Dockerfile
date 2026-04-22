@@ -1,0 +1,8 @@
+FROM nginx:alpine
+
+COPY src/main/resources/static /usr/share/nginx/html
+COPY docker/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
