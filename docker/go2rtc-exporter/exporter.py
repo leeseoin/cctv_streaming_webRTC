@@ -62,6 +62,7 @@ from datetime import datetime, timezone, timedelta
 from prometheus_client import start_http_server, Gauge, Counter
 
 GO2RTC_API = "http://go2rtc:1984"
+PROMETHEUS_URL = "http://prometheus:9090"
 EXPORTER_PORT = 1985
 POLL_INTERVAL = 5  # 폴링 간격(초). go2rtc /api/streams를 이 간격으로 조회
 KST = timezone(timedelta(hours=9))
@@ -175,14 +176,14 @@ daily_total_bytes = Gauge("go2rtc_daily_total_bytes", "Total bytes sent today") 
 # ── 카메라 TOP 10 (3개) ────────────────
 # sessions 기준 상위 10개 카메라만 노출. 라벨에 sessions/duration/peak_readers 통합.
 # Grafana 테이블에서 1개 쿼리로 camera/sessions/duration/peak_readers 한 줄에 표시 가능.
-_camera_labels = ["camera", "sessions", "duration", "peak_readers"]
+_camera_labels = ["camera"]
 daily_camera_sessions = Gauge("go2rtc_daily_camera_sessions", "Sessions per camera today", _camera_labels) # #28  종료 시 해당 카메라 +1
 daily_camera_duration = Gauge("go2rtc_daily_camera_duration_sec", "Total viewing duration per camera today (sec)", _camera_labels) # #29  종료 시 += duration
 daily_camera_peak_readers = Gauge("go2rtc_daily_camera_peak_readers", "Peak concurrent readers per camera today", _camera_labels) # #30  시청 중 max(동시 시청자) 갱신
 
 # ── IP TOP 100 (3개) ───────────────────
 # sessions 기준 상위 100개 IP만 노출. 라벨: ip, isp, mobile, sessions, duration
-_ip_labels = ["ip", "isp", "mobile", "sessions", "duration"]
+_ip_labels = ["ip", "isp", "mobile"]
 daily_ip_sessions = Gauge("go2rtc_daily_ip_sessions", "Sessions per IP today", _ip_labels) # #31  종료 시 해당 IP +1
 daily_ip_duration = Gauge("go2rtc_daily_ip_duration_sec", "Total viewing duration per IP today (sec)", _ip_labels) # #32  종료 시 += duration
 daily_ip_isp = Gauge("go2rtc_daily_ip_isp", "ISP info per IP (1=has info)", _ip_labels)   # #33  라벨 노출용, 값은 항상 1
@@ -250,6 +251,118 @@ def reset_daily():
     daily_ip_duration._metrics.clear()       # #32
     daily_ip_isp._metrics.clear()            # #33
     print(f"[INFO] Daily stats reset for {daily_state['date']}")
+
+
+# ════════════════════════════════════════
+# Prometheus에서 마지막 값 복구 (재시작 시 데이터 소실 방지)
+# ════════════════════════════════════════
+
+def _prom_query(promql):
+    """Prometheus instant query → result 리스트 반환. 실패 시 빈 리스트."""
+    try:
+        resp = requests.get(
+            f"{PROMETHEUS_URL}/api/v1/query",
+            params={"query": promql},
+            timeout=5,
+        )
+        return resp.json().get("data", {}).get("result", [])
+    except Exception as e:
+        print(f"[WARN] Prometheus query failed ({promql}): {e}")
+        return []
+
+
+def _prom_scalar(promql, default=0):
+    """단일 스칼라 메트릭 마지막 값 반환."""
+    results = _prom_query(promql)
+    if results:
+        return float(results[0]["value"][1])
+    return default
+
+
+def load_state():
+    """재시작 시 Prometheus에서 daily_state 복구.
+    데이터가 없으면 reset_daily()로 초기화.
+    """
+    reset_daily()
+
+    closed = _prom_scalar("go2rtc_daily_closed_sessions")
+    if closed == 0:
+        print("[INFO] No data in Prometheus. Starting fresh.")
+        return
+
+    print(f"[INFO] Restoring state from Prometheus (closed={int(closed)})")
+
+    # ── 스칼라 메트릭 복구 ──────────────────────────
+    daily_state["closed"]        = int(_prom_scalar("go2rtc_daily_closed_sessions"))
+    daily_state["closed_webrtc"] = int(_prom_scalar("go2rtc_daily_closed_webrtc"))
+    daily_state["closed_hls"]    = int(_prom_scalar("go2rtc_daily_closed_hls"))
+    daily_state["closed_rtsp"]   = int(_prom_scalar("go2rtc_daily_closed_rtsp"))
+    daily_state["peak_sessions"] = int(_prom_scalar("go2rtc_daily_peak_sessions"))
+    daily_state["peak_ips"]      = int(_prom_scalar("go2rtc_daily_peak_ips"))
+    daily_state["peak_cameras"]  = int(_prom_scalar("go2rtc_daily_peak_cameras"))
+    daily_state["total_duration"]= _prom_scalar("go2rtc_daily_total_duration_sec")
+    daily_state["total_bytes"]   = int(_prom_scalar("go2rtc_daily_total_bytes"))
+    daily_state["mobile_closed"] = int(_prom_scalar("go2rtc_daily_mobile_closed_sessions"))
+
+    # ── 카메라별 통계 복구 ──────────────────────────
+    for r in _prom_query("go2rtc_daily_camera_sessions"):
+        cam = r["metric"].get("camera", "")
+        if not cam:
+            continue
+        s = daily_state["camera_stats"].setdefault(cam, {"sessions": 0, "duration": 0.0, "peak_readers": 0})
+        s["sessions"] = int(float(r["value"][1]))
+    for r in _prom_query("go2rtc_daily_camera_duration_sec"):
+        cam = r["metric"].get("camera", "")
+        if not cam:
+            continue
+        s = daily_state["camera_stats"].setdefault(cam, {"sessions": 0, "duration": 0.0, "peak_readers": 0})
+        s["duration"] = float(r["value"][1])
+    for r in _prom_query("go2rtc_daily_camera_peak_readers"):
+        cam = r["metric"].get("camera", "")
+        if not cam:
+            continue
+        s = daily_state["camera_stats"].setdefault(cam, {"sessions": 0, "duration": 0.0, "peak_readers": 0})
+        s["peak_readers"] = int(float(r["value"][1]))
+
+    # ── IP별 통계 복구 ─────────────────────────────
+    for r in _prom_query("go2rtc_daily_ip_sessions"):
+        ip = r["metric"].get("ip", "")
+        if not ip:
+            continue
+        s = daily_state["ip_stats"].setdefault(ip, {"sessions": 0, "duration": 0.0})
+        s["sessions"] = int(float(r["value"][1]))
+    for r in _prom_query("go2rtc_daily_ip_duration_sec"):
+        ip = r["metric"].get("ip", "")
+        if not ip:
+            continue
+        s = daily_state["ip_stats"].setdefault(ip, {"sessions": 0, "duration": 0.0})
+        s["duration"] = float(r["value"][1])
+
+    # unique_ips set 복구
+    daily_state["unique_ips"] = set(daily_state["ip_stats"].keys())
+
+    # durations 리스트 복구: min/max 값을 플레이스홀더로 복원 (avg는 근사치)
+    stored_min = _prom_scalar("go2rtc_daily_min_duration_sec")
+    stored_max = _prom_scalar("go2rtc_daily_max_duration_sec")
+    if stored_min > 0 and stored_max > 0:
+        daily_state["durations"] = [stored_min, stored_max]
+
+    # ISP 캐시 복구: ip-api.com 재조회 없이 Prometheus 라벨에서 즉시 복구
+    for r in _prom_query("go2rtc_daily_ip_isp"):
+        ip  = r["metric"].get("ip", "")
+        isp = r["metric"].get("isp", "")
+        mobile_str = r["metric"].get("mobile", "")
+        if not ip:
+            continue
+        with _cache_lock:
+            ip_info_cache[ip] = {
+                "isp": isp,
+                "mobile": mobile_str == "Y",
+                "cached_at": time.time(),
+            }
+
+    print(f"[INFO] Restored: closed={daily_state['closed']}, "
+          f"cameras={len(daily_state['camera_stats'])}, ips={len(daily_state['ip_stats'])}")
 
 
 def normalize_protocol(format_name):
@@ -505,49 +618,95 @@ def collect():
     daily_peak_sessions.set(daily_state["peak_sessions"])    # #20
     daily_peak_ips.set(daily_state["peak_ips"])              # #21
     daily_peak_cameras.set(daily_state["peak_cameras"])      # #22
-    daily_total_duration.set(daily_state["total_duration"])   # #23
     daily_total_bytes.set(daily_state["total_bytes"])         # #27
     daily_mobile_closed.set(daily_state["mobile_closed"])    # #13
 
     # #14 daily_mobile_ratio: 모바일 종료 세션 / 전체 종료 세션 × 100
-    # 주의: "세션 비율"이지 "사람 비율"이 아님.
-    # 예: PC 20세션 + 폰 2세션 = 22세션 → ratio = 2/22 × 100 ≈ 9.09%
     if daily_state["closed"] > 0:
         daily_mobile_ratio.set(daily_state["mobile_closed"] / daily_state["closed"] * 100)
     else:
         daily_mobile_ratio.set(0)
 
-    # #24~#26 시청 시간 통계
-    durations = daily_state["durations"]
-    if durations:
-        daily_avg_duration.set(sum(durations) / len(durations))  # #24 평균 = sum / count
-        daily_max_duration.set(max(durations))                    # #25 최장
-        daily_min_duration.set(min(durations))                    # #26 최단
+    # 활성 세션 경과시간 실시간 합산 (merged 패턴)
+    active_durations = [now - s.get("start_time", now) for s in active_sessions.values()]
+
+    # #23 총 시청시간: 종료 세션 누적 + 활성 세션 현재 경과시간
+    daily_total_duration.set(daily_state["total_duration"] + sum(active_durations))  # #23
+
+    # #24~#26 avg/max/min
+    closed_durations = daily_state["durations"]
+    all_durations = closed_durations + active_durations  # avg/max는 활성 세션 포함
+
+    if all_durations:
+        daily_avg_duration.set(sum(all_durations) / len(all_durations))   # #24
+        daily_max_duration.set(max(all_durations))                         # #25 최장: 활성 포함
     else:
-        daily_avg_duration.set(0)   # #24
-        daily_max_duration.set(0)   # #25
-        daily_min_duration.set(0)   # #26
+        daily_avg_duration.set(0)
+        daily_max_duration.set(0)
+
+    # #26 최단: 종료된 세션만 (활성 세션은 아직 끝나지 않아 최단 후보 아님)
+    if closed_durations:
+        daily_min_duration.set(min(closed_durations))                      # #26
+    elif active_durations:
+        daily_min_duration.set(min(active_durations))  # 종료 세션 없으면 활성으로 대체
+    else:
+        daily_min_duration.set(0)
 
     # ─── 8) 카메라 TOP 10 노출 (#28~#30) ───
-    # sessions 기준 상위 10개만 Prometheus에 노출. 나머지는 안 보임.
-    # 라벨에 sessions/duration/peak_readers 통합 → Grafana 테이블 1쿼리로 전체 표시.
-    cam_sorted = sorted(daily_state["camera_stats"].items(), key=lambda x: x[1]["sessions"], reverse=True)[:50]
-    daily_camera_sessions._metrics.clear()      # 이전 폴링 라벨 정리
+    # 활성 세션의 현재 경과시간 + 동시 시청자 수를 실시간 반영.
+    # camera_stats(종료 세션 누적)는 건드리지 않고 노출용 merged_camera_stats만 사용.
+    merged_camera_stats = {}
+    for cam, stat in daily_state["camera_stats"].items():
+        merged_camera_stats[cam] = {
+            "sessions": stat["sessions"],
+            "duration": stat["duration"],
+            "peak_readers": stat["peak_readers"],
+        }
+    for session in active_sessions.values():
+        cam = session.get("stream", "unknown")
+        elapsed = now - session.get("start_time", now)
+        s = merged_camera_stats.setdefault(cam, {"sessions": 0, "duration": 0.0, "peak_readers": 0})
+        s["duration"] += elapsed
+        s["sessions"] += 1
+
+    # 현재 동시 시청자 수로 peak_readers 실시간 갱신
+    active_readers = {}
+    for session in active_sessions.values():
+        cam = session.get("stream", "unknown")
+        active_readers[cam] = active_readers.get(cam, 0) + 1
+    for cam, count in active_readers.items():
+        s = merged_camera_stats.setdefault(cam, {"sessions": 0, "duration": 0.0, "peak_readers": 0})
+        if count > s["peak_readers"]:
+            s["peak_readers"] = count
+
+    cam_sorted = sorted(merged_camera_stats.items(), key=lambda x: x[1]["sessions"], reverse=True)[:50]
+    daily_camera_sessions._metrics.clear()
     daily_camera_duration._metrics.clear()
     daily_camera_peak_readers._metrics.clear()
     for cam_name, stats in cam_sorted:
-        sessions_str = str(stats["sessions"])
-        duration_str = str(int(stats["duration"]))
-        peak_str = str(stats["peak_readers"])
-        common = dict(camera=cam_name, sessions=sessions_str, duration=duration_str, peak_readers=peak_str)
-        daily_camera_sessions.labels(**common).set(stats["sessions"])       # #28
-        daily_camera_duration.labels(**common).set(stats["duration"])        # #29
-        daily_camera_peak_readers.labels(**common).set(stats["peak_readers"]) # #30
+        daily_camera_sessions.labels(camera=cam_name).set(stats["sessions"])        # #28
+        daily_camera_duration.labels(camera=cam_name).set(stats["duration"])         # #29
+        daily_camera_peak_readers.labels(camera=cam_name).set(stats["peak_readers"]) # #30
 
     # ─── 9) IP TOP 100 노출 (#31~#33) ───
     # sessions 기준 상위 100개만 Prometheus에 노출.
     # 라벨: ip, isp(통신사), mobile(Y/N/""), sessions(현재 누적 문자열), duration(현재 누적 문자열)
-    ip_sorted = sorted(daily_state["ip_stats"].items(), key=lambda x: x[1]["sessions"], reverse=True)[:100]
+    #
+    # 활성 세션의 현재 경과시간을 합산해서 실시간 반영.
+    # ip_stats(종료 세션 누적)는 건드리지 않고 노출용 merged_ip_stats만 사용.
+    merged_ip_stats = {}
+    for ip, stat in daily_state["ip_stats"].items():
+        merged_ip_stats[ip] = {"sessions": stat["sessions"], "duration": stat["duration"]}
+    for session in active_sessions.values():
+        ip = session.get("ip")
+        if not ip:
+            continue
+        elapsed = now - session.get("start_time", now)
+        s = merged_ip_stats.setdefault(ip, {"sessions": 0, "duration": 0.0})
+        s["duration"] += elapsed
+        s["sessions"] += 1  # 활성 세션도 카운트 (종료 시 ip_stats에 +1되고 active에서 빠지므로 중복 없음)
+
+    ip_sorted = sorted(merged_ip_stats.items(), key=lambda x: x[1]["sessions"], reverse=True)[:100]
     daily_ip_sessions._metrics.clear()  # 이전 폴링 라벨 정리
     daily_ip_duration._metrics.clear()
     daily_ip_isp._metrics.clear()
@@ -557,17 +716,15 @@ def collect():
             cached = ip_info_cache.get(ip_addr, {})
         isp = cached.get("isp", "")
         mobile = "Y" if cached.get("mobile", False) else "N" if cached else ""
-        sessions_str = str(stats["sessions"])
-        duration_str = str(int(stats["duration"]))
 
-        common = dict(ip=ip_addr, isp=isp, mobile=mobile, sessions=sessions_str, duration=duration_str)
+        common = dict(ip=ip_addr, isp=isp, mobile=mobile)
         daily_ip_sessions.labels(**common).set(stats["sessions"])   # #31
         daily_ip_duration.labels(**common).set(stats["duration"])   # #32
-        daily_ip_isp.labels(**common).set(1)                        # #33 값은 항상 1, 라벨 노출용
+        daily_ip_isp.labels(**common).set(1)                        # #33 라벨 노출용, 값은 항상 1
 
 
 if __name__ == "__main__":
-    reset_daily()
+    load_state()
     start_http_server(EXPORTER_PORT)
     print(f"go2rtc exporter started on :{EXPORTER_PORT}, polling {GO2RTC_API} every {POLL_INTERVAL}s")
     while True:
